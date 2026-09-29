@@ -39,7 +39,7 @@ class ClaimEvent(BaseModel):
         description="Unique identifier for the claim, preserved through the pipeline"
     )
     speaker: str = Field(
-        ...,
+        default="Speaker 1",
         min_length=1,
         description="Identifier of the speaker who made the claim"
     )
@@ -107,6 +107,10 @@ class VerificationEvent(BaseModel):
         if not trimmed:
             raise ValueError("Reason cannot be empty or pure whitespace.")
         return trimmed
+
+    def to_dict(self) -> dict:
+        """Serializes VerificationEvent to standard dictionary."""
+        return self.model_dump()
 
 
 class EvidenceItem(BaseModel):

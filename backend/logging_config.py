@@ -34,14 +34,6 @@ WS_CLIENT_CONNECTED = "WS_CLIENT_CONNECTED"
 WS_CLIENT_DISCONNECTED = "WS_CLIENT_DISCONNECTED"
 SCHEMA_VALIDATION_FAILED = "SCHEMA_VALIDATION_FAILED"
 
-TRACE_LABELS: Tuple[str, ...] = (
-    TRANSCRIPT_RECEIVED,
-    CLAIM_CREATED,
-    VERIFICATION_STARTED,
-    VERIFICATION_COMPLETED,
-    FRONTEND_BROADCAST,
-)
-
 # Logger name used for pipeline tracing so labels can be filtered in isolation.
 trace_logger = logging.getLogger("live_fact_checker.trace")
 

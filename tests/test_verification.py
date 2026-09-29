@@ -284,3 +284,189 @@ def test_all_verdict_types_represented_in_mock_claims():
     assert VerdictType.TRUE in verdicts
     assert VerdictType.FALSE in verdicts
     assert VerdictType.UNVERIFIABLE in verdicts
+
+
+# ---------------------------------------------------------------------------
+# 7. Interoperability & Plug-and-Play Tests for Teammate Integration
+# ---------------------------------------------------------------------------
+
+def test_verification_event_to_dict():
+    """Ensures to_dict returns a valid plain dictionary matching the contract."""
+    event = VerificationEvent(
+        type="verification",
+        claimId="claim_001",
+        verdict=VerdictType.FALSE,
+        reason="The available source reports a different figure.",
+        source="https://example.com",
+    )
+    d = event.to_dict()
+    assert isinstance(d, dict)
+    assert d["type"] == "verification"
+    assert d["claimId"] == "claim_001"
+    assert d["verdict"] == "False"
+    assert d["source"] == "https://example.com"
+
+
+def test_service_verify_claim_dict_interface():
+    """Ensures verify_claim_dict accepts a dict and returns an agreed dict."""
+    service = VerificationService()
+    claim_dict = {
+        "type": "claim",
+        "claimId": "claim_atif_01",
+        "speaker": "Speaker 1",
+        "claim": "The company sold two million units.",
+        "timestamp": 12.4,
+    }
+    result_dict = service.verify_claim_dict(claim_dict)
+    assert isinstance(result_dict, dict)
+    assert result_dict["type"] == "verification"
+    assert result_dict["claimId"] == "claim_atif_01"
+    assert result_dict["verdict"] == "False"
+    assert result_dict["reason"] != ""
+    assert result_dict["source"] != ""
+
+
+def test_service_handles_forwarded_extra_fields():
+    """Ensures verify_claim gracefully filters extra pipeline metadata (e.g. sessionId)."""
+    service = VerificationService()
+    forwarded = {
+        "type": "claim",
+        "claimId": "claim_forwarded_01",
+        "speaker": "Speaker 1",
+        "claim": "The company sold two million units.",
+        "timestamp": 12.4,
+        "sessionId": "sess_abc123",
+        "claimType": "statistical",
+    }
+    result = service.verify_claim(forwarded)
+    assert result.claimId == "claim_forwarded_01"
+    assert result.verdict == VerdictType.FALSE
+
+
+def test_service_accepts_model_dump_object():
+    """Ensures objects from another module with a model_dump method are accepted."""
+    class FakeExternalClaim:
+        def model_dump(self):
+            return {
+                "type": "claim",
+                "claimId": "claim_ext_01",
+                "speaker": "Speaker 2",
+                "claim": "NASA's Apollo 11 landed humans on the Moon in July 1969.",
+                "timestamp": 10.0,
+            }
+
+    service = VerificationService()
+    result = service.verify_claim(FakeExternalClaim())
+    assert result.claimId == "claim_ext_01"
+    assert result.verdict == VerdictType.TRUE
+
+
+# ---------------------------------------------------------------------------
+# 8. WebSearchRetriever & Retriever Factory Tests
+# ---------------------------------------------------------------------------
+
+def test_retriever_factory_default(monkeypatch):
+    """Ensures create_default_retriever defaults to MockRetriever unless key is set."""
+    from verification.retriever import create_default_retriever, WebSearchRetriever
+
+    monkeypatch.delenv("SEARCH_API_KEY", raising=False)
+    retriever = create_default_retriever()
+    assert isinstance(retriever, MockRetriever)
+
+    monkeypatch.setenv("SEARCH_API_KEY", "test_key_123")
+    retriever_with_key = create_default_retriever()
+    assert isinstance(retriever_with_key, WebSearchRetriever)
+
+
+def test_web_search_retriever_unconfigured_raises():
+    """Ensures unconfigured WebSearchRetriever raises RetrieverConfigurationError."""
+    from verification.retriever import RetrieverConfigurationError, WebSearchRetriever
+
+    retriever = WebSearchRetriever(api_key=None)
+    with pytest.raises(RetrieverConfigurationError) as exc_info:
+        retriever.retrieve("test query")
+    assert "SEARCH_API_KEY" in str(exc_info.value)
+
+
+def test_web_search_retriever_with_custom_handler():
+    """Ensures custom search_handler plug-in works seamlessly."""
+    from verification.retriever import WebSearchRetriever
+
+    def custom_search(query: str, max_results: int):
+        return [
+            EvidenceItem(
+                snippet="Custom search confirmed the facts of this statement.",
+                source_url="https://custom-search.example.com/result",
+                stance="supports",
+                confidence=0.95,
+            )
+        ]
+
+    retriever = WebSearchRetriever(search_handler=custom_search)
+    service = VerificationService(retriever=retriever)
+    claim = {
+        "type": "claim",
+        "claimId": "claim_custom_search_01",
+        "speaker": "Speaker 1",
+        "claim": "A bespoke verifiable factual claim.",
+        "timestamp": 5.0,
+    }
+    result = service.verify_claim(claim)
+    assert result.verdict == VerdictType.TRUE
+    assert result.source == "https://custom-search.example.com/result"
+
+
+def test_web_search_retriever_parse_search_results():
+    """Ensures parse_search_results normalizes third-party search results."""
+    from verification.retriever import WebSearchRetriever
+
+    raw_results = [
+        {"title": "Doc 1", "snippet": "Official excerpt.", "url": "https://source1.com", "score": 0.9},
+        {"title": "Doc 2", "body": "Alternative excerpt.", "link": "https://source2.com", "confidence": 0.85},
+        {"title": "Doc 3", "snippet": "", "url": "https://empty.com"},
+    ]
+    items = WebSearchRetriever.parse_search_results(raw_results)
+    assert len(items) == 2
+    assert items[0].snippet == "Official excerpt."
+    assert items[0].source_url == "https://source1.com"
+    assert items[0].confidence == 0.9
+    assert items[1].snippet == "Alternative excerpt."
+    assert items[1].source_url == "https://source2.com"
+
+
+# ---------------------------------------------------------------------------
+# 9. Numerical & Empty Snippet Heuristics Tests
+# ---------------------------------------------------------------------------
+
+def test_heuristic_numerical_mismatch_unannotated():
+    """Ensures unannotated snippet with numerical mismatch returns FALSE."""
+    checker = VerificationChecker()
+    evidence = [
+        EvidenceItem(
+            snippet="The organization disclosed it achieved five hundred users globally.",
+            source_url="https://example.com/report",
+            stance=None,
+            confidence=0.9,
+        )
+    ]
+    verdict, reason, source = checker.verify(
+        "The organization achieved two million users globally.",
+        evidence,
+    )
+    assert verdict == VerdictType.FALSE
+    assert "different figure" in reason.lower()
+
+
+def test_empty_evidence_snippet_filtered():
+    """Ensures empty evidence snippets are filtered and result in Unverifiable."""
+    checker = VerificationChecker()
+    empty_evidence = [
+        EvidenceItem(
+            snippet="   ",
+            source_url="https://example.com/empty",
+            confidence=0.9,
+        )
+    ]
+    verdict, reason, source = checker.verify("Some claim", empty_evidence)
+    assert verdict == VerdictType.UNVERIFIABLE
+

@@ -5,11 +5,12 @@ and are never written to logs, never returned by any HTTP route, and never
 placed in the browser payload.
 """
 
+import json
 from functools import lru_cache
-from typing import List, Literal, Optional
+from typing import Annotated, List, Literal, Optional
 
 from pydantic import Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["development", "production", "test"]
 
@@ -43,7 +44,12 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, ge=1, le=65535)
 
     # --- CORS -------------------------------------------------------------
-    cors_origins: List[str] = Field(
+    # `NoDecode` stops pydantic-settings from running json.loads() on the raw
+    # environment value. Without it, any CORS_ORIGINS that is not valid JSON
+    # (for example the comma-separated form this project documents) raises
+    # SettingsError while the settings object is being built, which fails the
+    # module import and takes the whole application down.
+    cors_origins: Annotated[List[str], NoDecode] = Field(
         default_factory=lambda: list(LOCAL_DEV_ORIGINS),
         description="Comma-separated list of allowed browser origins.",
     )
@@ -75,11 +81,24 @@ class Settings(BaseSettings):
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
-        """Accept a comma-separated string or an actual list from the environment."""
+        """Accept a comma-separated string, a JSON array, or a real list.
+
+        Deployment platforms often store a variable as either
+        ``https://a.example.com,https://b.example.com`` or
+        ``["https://a.example.com","https://b.example.com"]``; both must work
+        without raising.
+        """
         if isinstance(value, str):
             stripped = value.strip()
             if not stripped:
                 return list(LOCAL_DEV_ORIGINS)
+            if stripped.startswith("["):
+                try:
+                    decoded = json.loads(stripped)
+                except json.JSONDecodeError:
+                    decoded = None
+                if isinstance(decoded, list):
+                    return [str(item).strip() for item in decoded if str(item).strip()]
             return [origin.strip() for origin in stripped.split(",") if origin.strip()]
         return value
 

@@ -163,11 +163,6 @@ class SessionManager:
             raise SessionNotFoundError(session_id)
         return session
 
-    async def exists(self, session_id: str) -> bool:
-        """Return whether a session id is registered."""
-        async with self._lock:
-            return session_id in self._sessions
-
     async def stop(self, session_id: str) -> Session:
         """Mark a session as stopped and cancel its background task.
 
@@ -226,11 +221,6 @@ class SessionManager:
             self._claims[key] = claim
             return True
 
-    async def get_claim(self, session_id: str, claim_id: str) -> Optional[ClaimEvent]:
-        """Return the first claim registered under this id, or ``None``."""
-        async with self._lock:
-            return self._claims.get((session_id, claim_id))
-
     async def store_verification(
         self, session_id: str, verification: VerificationEvent
     ) -> None:
@@ -262,56 +252,25 @@ class SessionManager:
             return self._sessions.pop(session_id, None)
 
     # -- counters ---------------------------------------------------------
-    async def record_transcript(self, session_id: str) -> Optional[Session]:
-        async with self._lock:
-            session = self._sessions.get(session_id)
-            if session is not None:
-                session.transcriptCount += 1
-                session.touch()
-            return session
+    async def bump(self, session_id: str, field: str, count: int = 1) -> Optional[Session]:
+        """Increment one counter on a session and refresh its ``updatedAt``.
 
-    async def record_claims(self, session_id: str, count: int = 1) -> Optional[Session]:
-        async with self._lock:
-            session = self._sessions.get(session_id)
-            if session is not None:
-                session.claimCount += count
-                session.touch()
-            return session
+        Args:
+            session_id: Session to update.
+            field: Name of the counter attribute on :class:`Session`.
+            count: Amount to add. Defaults to 1.
 
-    async def record_verifications(
-        self, session_id: str, count: int = 1
-    ) -> Optional[Session]:
+        Returns:
+            The updated session, or ``None`` when the session is unknown.
+        """
         async with self._lock:
             session = self._sessions.get(session_id)
             if session is not None:
-                session.verificationCount += count
-                session.touch()
-            return session
-
-    async def record_error(self, session_id: str) -> Optional[Session]:
-        async with self._lock:
-            session = self._sessions.get(session_id)
-            if session is not None:
-                session.errorCount += 1
+                setattr(session, field, getattr(session, field) + count)
                 session.touch()
             return session
 
     # -- listing ----------------------------------------------------------
-    async def list_sessions(self) -> List[Session]:
-        async with self._lock:
-            return sorted(self._sessions.values(), key=lambda s: s.createdAt)
-
     async def count(self) -> int:
         async with self._lock:
             return len(self._sessions)
-
-    async def clear(self) -> None:
-        """Drop every session, registry and background task. Intended for tests."""
-        async with self._lock:
-            self._sessions.clear()
-            self._claims.clear()
-            self._verifications.clear()
-            tasks = [self._background.pop(key) for key in list(self._background)]
-            self._counter = 0
-        for task in tasks:
-            await _settle(task, "clear")

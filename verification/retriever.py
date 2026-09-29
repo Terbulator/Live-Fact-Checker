@@ -5,11 +5,22 @@ MockRetriever for local development and testing, along with an extensible stub f
 connecting real web search engines (Tavily, Serper, Bing, etc.) in the future.
 """
 
+import os
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 import re
 
 from verification.models import EvidenceItem
+
+
+class RetrieverError(Exception):
+    """Base exception for retrieval errors."""
+    pass
+
+
+class RetrieverConfigurationError(RetrieverError):
+    """Raised when a retriever is misconfigured or lacks required credentials."""
+    pass
 
 
 class EvidenceRetriever(ABC):
@@ -176,24 +187,109 @@ class MockRetriever(EvidenceRetriever):
 
 
 class WebSearchRetriever(EvidenceRetriever):
-    """Stub for plugging in real web search APIs (e.g. Tavily, Serper, Bing).
+    """Provider-independent web search retriever.
 
-    Designed to drop into the pipeline without altering verification logic.
+    Supports plugging in any external web search provider (e.g., Tavily, Serper,
+    Google Custom Search, Bing) by providing an API key or custom search handler.
+    If no search handler is provided and no SEARCH_API_KEY is found, raises
+    RetrieverConfigurationError.
     """
 
-    def __init__(self, api_key: Optional[str] = None, provider: str = "tavily"):
-        self.api_key = api_key
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        provider: str = "generic",
+        search_handler: Optional[Callable[[str, int], List[EvidenceItem]]] = None,
+    ):
+        """Initializes the web search retriever.
+
+        Args:
+            api_key: Optional API key. If omitted, falls back to SEARCH_API_KEY env var.
+            provider: Informative name of the provider (e.g. 'tavily', 'serper', 'google').
+            search_handler: Optional callable executing the search and returning EvidenceItem list.
+        """
+        self.api_key = api_key or os.getenv("SEARCH_API_KEY")
         self.provider = provider
+        self.search_handler = search_handler
+
+    @property
+    def is_configured(self) -> bool:
+        """Returns True if an API key or custom search handler is configured."""
+        return bool(self.search_handler or (self.api_key and self.api_key.strip()))
+
+    @classmethod
+    def parse_search_results(cls, raw_results: List[dict]) -> List[EvidenceItem]:
+        """Convenience utility to convert generic search API JSON items into EvidenceItem models.
+
+        Accepts items with standard keys like:
+        {'title': ..., 'snippet' / 'content' / 'body': ..., 'url' / 'link': ..., 'confidence' / 'score': ...}
+        """
+        parsed_items: List[EvidenceItem] = []
+        for item in raw_results:
+            snippet = item.get("snippet") or item.get("content") or item.get("body") or ""
+            source_url = item.get("url") or item.get("link") or item.get("source") or "https://example.com"
+            title = item.get("title")
+            raw_conf = item.get("confidence") or item.get("score") or 1.0
+            try:
+                confidence = float(raw_conf)
+                confidence = max(0.0, min(1.0, confidence))
+            except (ValueError, TypeError):
+                confidence = 1.0
+
+            if snippet.strip():
+                parsed_items.append(
+                    EvidenceItem(
+                        snippet=snippet.strip(),
+                        source_url=str(source_url).strip(),
+                        title=title.strip() if title else None,
+                        confidence=confidence,
+                    )
+                )
+        return parsed_items
 
     def retrieve(self, query: str, max_results: int = 3) -> List[EvidenceItem]:
-        """Placeholder for web API retrieval.
-        
-        Raises RuntimeError if attempted without configured API key.
+        """Retrieves evidence snippets for the query.
+
+        If a custom search_handler was provided, delegates to it.
+        Otherwise, if no API key is configured, raises RetrieverConfigurationError.
         """
-        if not self.api_key:
-            raise RuntimeError(
-                f"WebSearchRetriever ({self.provider}) requires an API key. "
-                "Use MockRetriever for offline development and testing."
+        if not query or not query.strip():
+            return []
+
+        if self.search_handler is not None:
+            return self.search_handler(query, max_results)
+
+        if not self.is_configured:
+            raise RetrieverConfigurationError(
+                f"WebSearchRetriever ({self.provider}) requires a configured API key or search_handler. "
+                "Set the SEARCH_API_KEY environment variable or use MockRetriever for offline testing."
             )
-        # Future implementation: HTTP call to Tavily/Serper API
+
+        # Provider stub: When an external provider client is wired in, this delegates to it.
+        # Until then, returns empty evidence without inventing fake external data.
         return []
+
+
+def create_default_retriever(
+    use_mock: Optional[bool] = None,
+    api_key: Optional[str] = None,
+) -> EvidenceRetriever:
+    """Factory creating the appropriate retriever based on configuration.
+
+    Args:
+        use_mock: If True, explicitly returns MockRetriever. If False, returns WebSearchRetriever.
+                  If None, auto-selects WebSearchRetriever if SEARCH_API_KEY is present,
+                  otherwise defaults safely to MockRetriever.
+        api_key: Optional API key override for WebSearchRetriever.
+    """
+    if use_mock is True:
+        return MockRetriever()
+
+    resolved_key = api_key or os.getenv("SEARCH_API_KEY")
+    if use_mock is False:
+        return WebSearchRetriever(api_key=resolved_key)
+
+    if resolved_key and resolved_key.strip():
+        return WebSearchRetriever(api_key=resolved_key.strip())
+
+    return MockRetriever()

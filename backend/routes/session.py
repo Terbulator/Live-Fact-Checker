@@ -3,8 +3,6 @@
 The backend owns ``sessionId``: clients never supply one.
 """
 
-from __future__ import annotations
-
 import asyncio
 from typing import Optional
 

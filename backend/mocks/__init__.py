@@ -11,8 +11,6 @@ from backend.mocks.mock_stream import (
     MockClaimEngine,
     MockVerificationEngine,
     build_mock_transcript,
-    build_mock_transcripts,
-    run_mock_pipeline,
     stream_mock_transcripts,
 )
 
@@ -24,7 +22,5 @@ __all__ = [
     "REFERENCE_SPEAKER",
     "REFERENCE_TIMESTAMP",
     "build_mock_transcript",
-    "build_mock_transcripts",
-    "run_mock_pipeline",
     "stream_mock_transcripts",
 ]

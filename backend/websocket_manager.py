@@ -12,7 +12,7 @@ request handler.
 """
 
 import asyncio
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Dict, Optional, Set
 
 from starlette.websockets import WebSocket, WebSocketState
 
@@ -117,12 +117,13 @@ class WebSocketManager:
         log_trace(
             FRONTEND_BROADCAST,
             sessionId=session_id,
-            eventType=_event_type_of(event),
+            eventType=event.type,
             delivered=delivered,
             dropped=len(dead),
         )
         return delivered
 
+<<<<<<< HEAD
     async def broadcast(
         self, session_id: str, events: Iterable[Any]
     ) -> int:
@@ -132,15 +133,14 @@ class WebSocketManager:
             total += await self.send_to_session(session_id, event)
         return total
 
+=======
+>>>>>>> 519a7346a1c04ed3296a5d645ae2767b55449c39
     # -- introspection ----------------------------------------------------
     def connection_count(self, session_id: Optional[str] = None) -> int:
         """Number of live clients, for one session or across all sessions."""
         if session_id is not None:
             return len(self._connections.get(session_id, ()))
         return sum(len(sockets) for sockets in self._connections.values())
-
-    def sessions_with_clients(self) -> List[str]:
-        return sorted(self._connections.keys())
 
     async def clear(self) -> None:
         """Forget every socket. Intended for tests."""
@@ -153,7 +153,7 @@ class WebSocketManager:
         if websocket.client_state is not WebSocketState.CONNECTED:
             return False
         try:
-            await websocket.send_json(_to_payload(event))
+            await websocket.send_json(event.to_wire())
             return True
         except Exception as exc:  # noqa: BLE001 - a dead peer must not propagate
             logger.debug(
@@ -173,19 +173,3 @@ class WebSocketManager:
                 type(exc).__name__,
                 extra={"trace": "WS_CLOSE_FAILED", "errorType": type(exc).__name__},
             )
-
-
-def _event_type_of(event: Any) -> str:
-    if isinstance(event, dict):
-        return str(event.get("type", "unknown"))
-    return str(getattr(event, "type", "unknown"))
-
-
-def _to_payload(event: Any) -> Dict[str, Any]:
-    """Normalise an event model or plain dict into a JSON-ready payload."""
-    if isinstance(event, dict):
-        return event
-    to_wire = getattr(event, "to_wire", None)
-    if callable(to_wire):
-        return to_wire()
-    return dict(event)  # pragma: no cover - defensive

@@ -13,8 +13,6 @@ default 422 shape. Every accepted event is validated, routed, and broadcast to
 the session's WebSocket clients before the response returns.
 """
 
-from __future__ import annotations
-
 from typing import Any, Dict, Optional, Type, TypeVar
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -180,8 +178,22 @@ async def _require_active_session(request: Request, session_id: str) -> None:
 async def ingest_transcript(request: Request) -> TranscriptAcceptedResponse:
     """Accept a transcript event, run claim extraction and verification.
 
-    The transcript is broadcast first, then any claim (as a pending card), then
-    the verification result — so the frontend renders progressively.
+    This is the single boundary Tushar's AssemblyAI realtime code calls. Post one
+    normalized JSON ``TranscriptEvent`` per segment::
+
+        POST /events/transcript
+        {"type": "transcript", "sessionId": "...", "speaker": null,
+         "text": "...", "timestamp": 1.2, "isFinal": false}
+
+    ``isFinal: false`` interim segments are accepted, broadcast and counted but
+    are never claim-checked; only a finalized line enters claim extraction and
+    verification. Requires the session from ``POST /session/start``.
+
+    Returns 202 with the counts/claims/verifications this event produced, 404
+    for an unknown session, 409 for a stopped one, and 422 for a malformed or
+    mistyped event. The transcript is broadcast first, then any claim (as a
+    pending card), then the verification result — so the frontend renders
+    progressively.
     """
     router_instance = request.app.state.router
     event: TranscriptEvent = await _validate(request, TranscriptEvent)

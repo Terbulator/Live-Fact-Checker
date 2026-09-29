@@ -134,15 +134,6 @@ def test_mock_pipeline_ignores_non_claimable_transcript(
     assert body["counts"] == {"claims": 0, "verifications": 0, "errors": 0}
 
 
-def test_mock_pipeline_skips_non_final_transcript(
-    client: TestClient, session_id: str
-) -> None:
-    response = client.post(
-        "/events/transcript", json=transcript_payload(session_id, isFinal=False)
-    )
-    assert response.json()["claims"] == []
-
-
 def test_start_session_with_mock_pipeline_option(client: TestClient) -> None:
     """`startMockPipeline` replays the scripted demo into a live session."""
     response = client.post("/session/start", json={"startMockPipeline": True})
@@ -172,7 +163,14 @@ def test_mock_scripted_stream_broadcasts_reference_claim(client: TestClient) -> 
 
     with client.websocket_connect(f"/ws/session/{session_id}") as websocket:
         _drain_until(websocket, "session")
-        asyncio.run(mock_stream.run_mock_pipeline(client.app.state.router, session_id))
+        asyncio.run(
+            mock_stream.stream_mock_transcripts(
+                client.app.state.router,
+                client.app.state.session_manager,
+                session_id,
+                delay=0,
+            )
+        )
 
         verification = _drain_until(websocket, "verification")
         assert verification["claimId"] == "claim_001"

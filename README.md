@@ -90,9 +90,6 @@ uvicorn backend.main:app --reload
 
 # Explicit host and port
 uvicorn backend.main:app --host 127.0.0.1 --port 8000
-
-# Equivalent convenience entry point
-python -m backend.main
 ```
 
 Interactive API docs: <http://127.0.0.1:8000/docs>
@@ -352,7 +349,7 @@ Claim Event
 2. Evidence Retrieval (verification/retriever.py)
    - Retrieves authoritative evidence snippets via an abstract `EvidenceRetriever` interface
    - Ships with a zero-dependency `MockRetriever` for local offline testing
-   - Pluggable `WebSearchRetriever` stub for future live search engines
+   - Implement the `EvidenceRetriever` interface to add a real search backend
     │
     ▼
 3. Fact Checking & Stance Comparison (verification/checker.py)
@@ -420,7 +417,7 @@ Live-Fact-Checker/
 │   ├── __init__.py           # Package exports
 │   ├── models.py             # Pydantic schemas (ClaimEvent, VerificationEvent, EvidenceItem)
 │   ├── query_generator.py    # Speech artifact cleaning & query synthesis
-│   ├── retriever.py          # EvidenceRetriever ABC, MockRetriever & WebSearchRetriever stub
+│   ├── retriever.py          # EvidenceRetriever ABC + MockRetriever
 │   ├── checker.py            # Comparison logic & 3-verdict determination
 │   ├── service.py            # VerificationService orchestrator & CLI runner
 │   └── mock_data.py          # Curated test datasets covering all edge cases
@@ -430,29 +427,6 @@ Live-Fact-Checker/
 ├── .gitignore                # Git ignore rules (.venv, caches, env files)
 ├── requirements.txt          # Python dependencies (pydantic, pytest)
 └── README.md                 # System documentation
-```
-
----
-
-## Installation & Setup
-
-### Prerequisites
-* Python 3.10+ (tested with Python 3.11)
-
-### Setup Virtual Environment
-
-```bash
-# Create virtual environment
-python -m venv .venv
-
-# Activate on Windows (PowerShell)
-.venv\Scripts\Activate.ps1
-
-# Or activate on Linux/macOS
-source .venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
 ```
 
 ---
@@ -494,24 +468,64 @@ pytest -v
 
 ---
 
+## Teammate Integration: How Claim Extraction (Atif) Calls This Module
+
+When Atif's claim extractor produces a claim event, it can be passed directly into `VerificationService`:
+
+```python
+from verification import VerificationService
+
+service = VerificationService()
+
+# 1. Using a raw dictionary:
+claim_dict = {
+    "type": "claim",
+    "claimId": "claim_001",
+    "speaker": "Speaker 1",
+    "claim": "The company sold two million units.",
+    "timestamp": 12.4
+}
+
+# Returns a VerificationEvent instance:
+verification_event = service.verify_claim(claim_dict)
+print(verification_event.claimId)   # "claim_001" (preserved)
+print(verification_event.verdict)   # VerdictType.FALSE ("False")
+print(verification_event.reason)    # Concise rationale
+print(verification_event.source)    # Authoritative source URL
+
+# 2. Or pure dict-in, dict-out:
+result_dict = service.verify_claim_dict(claim_dict)
+# result_dict is:
+# {
+#   "type": "verification",
+#   "claimId": "claim_001",
+#   "verdict": "False",
+#   "reason": "...",
+#   "source": "..."
+# }
+```
+
+---
+
 ## Integrating Real Search Providers
 
 To connect a live search API (e.g. Tavily, Google Custom Search, Serper, Bing) during later integration stages:
 
-1. Open `verification/retriever.py`.
-2. Implement the `retrieve(query: str, max_results: int = 3) -> list[EvidenceItem]` method in `WebSearchRetriever` (or create a custom `TavilyRetriever(EvidenceRetriever)` subclass).
-3. Inject your retriever into the `VerificationService`:
+1. Provide `SEARCH_API_KEY` in `.env` (or pass `api_key` to `WebSearchRetriever`).
+2. Alternatively, inject a custom `search_handler` callable directly into `WebSearchRetriever`:
 
 ```python
-from verification.service import VerificationService
-from verification.retriever import WebSearchRetriever
+from verification import VerificationService, WebSearchRetriever
 
-# Initialize with your custom retriever instance
-live_retriever = WebSearchRetriever(api_key="your_api_key", provider="tavily")
-service = VerificationService(retriever=live_retriever)
+# Custom search function returning EvidenceItem objects:
+retriever = WebSearchRetriever(api_key="your_api_key", search_handler=your_search_function)
+service = VerificationService(retriever=retriever)
 
 # Run verification - the verification logic remains completely unchanged!
-result = service.verify_claim(claim_event)
+result = service.verify_claim(claim_dict)
 ```
 
+Read the API key from the environment; never hardcode it.
+
 No modifications to `checker.py`, `models.py`, or `service.py` are needed when switching search backends.
+

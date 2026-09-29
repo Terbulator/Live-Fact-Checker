@@ -11,8 +11,6 @@ Reference flow (matches the contracts in the project documentation)::
       -> TRUE           "India defeated Sri Lanka in the 2011 final."
 """
 
-from __future__ import annotations
-
 import asyncio
 import re
 from typing import Dict, List, Optional, Sequence
@@ -37,7 +35,7 @@ NO_RULE_VERDICT = Verdict.UNVERIFIABLE
 NO_RULE_REASON = "The offline mock has no evidence rule for this claim."
 NO_RULE_SOURCE = "https://example.com/no-evidence"
 
-#: Transcript segments replayed by :func:`run_mock_pipeline`.
+#: Transcript segments replayed by :func:`stream_mock_transcripts`.
 MOCK_TRANSCRIPT_SCRIPT: List[Dict[str, object]] = [
     {
         "speaker": "Speaker 1",
@@ -182,19 +180,6 @@ def build_mock_transcript(
     )
 
 
-def build_mock_transcripts(
-    session_id: str, count: Optional[int] = None
-) -> List[TranscriptEvent]:
-    """Build the scripted transcript events for a session.
-
-    Args:
-        session_id: Session the events belong to.
-        count: How many segments to build. Defaults to the whole script.
-    """
-    total = len(MOCK_TRANSCRIPT_SCRIPT) if count is None else count
-    return [build_mock_transcript(session_id, i + 1) for i in range(total)]
-
-
 async def stream_mock_transcripts(
     router, session_manager: SessionManager, session_id: str, delay: float = 0.35
 ) -> None:
@@ -226,14 +211,3 @@ async def stream_mock_transcripts(
             extra={"trace": "MOCK_PIPELINE_CANCELLED", "sessionId": session_id},
         )
         raise
-
-
-async def run_mock_pipeline(router, session_id: str) -> None:
-    """Run the whole mock pipeline for a session without pacing.
-
-    Every claim produced is routed to verification and every result is
-    broadcast to the frontend exactly as a real integration would be.
-    """
-    transcripts = build_mock_transcripts(session_id)
-    for transcript in transcripts:
-        await router.handle_transcript(transcript)

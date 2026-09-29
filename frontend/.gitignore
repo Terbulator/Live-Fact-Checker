@@ -1,0 +1,30 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build output
+dist/
+dist-ssr/
+build/
+
+# Local environment (must never commit a backend URL with secrets)
+.env
+.env.*
+!.env.example
+
+# Vite cache
+.vite/
+*.local
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

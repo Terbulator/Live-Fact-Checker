@@ -18,6 +18,10 @@ from backend.mocks.mock_stream import MockClaimEngine, MockVerificationEngine
 os.environ["ENVIRONMENT"] = "test"
 os.environ["USE_MOCK_ENGINES"] = "true"
 os.environ["LOG_LEVEL"] = "WARNING"
+# Explicitly unset credentials so tests are isolated from developer .env
+os.environ["ASSEMBLYAI_API_KEY"] = ""
+os.environ["LLM_GATEWAY_API_KEY"] = ""
+os.environ["SEARCH_API_KEY"] = ""
 
 
 @pytest.fixture()

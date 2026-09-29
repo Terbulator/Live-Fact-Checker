@@ -7,13 +7,7 @@ ASGI application.
 Run locally::
 
     uvicorn backend.main:app --reload
-
-or::
-
-    python -m backend.main
 """
-
-from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
@@ -295,21 +289,3 @@ async def _handle_client_message(
 
 
 app = create_app()
-
-
-def main() -> None:  # pragma: no cover - manual entry point
-    """Run the backend with uvicorn using the configured host and port."""
-    import uvicorn
-
-    settings = get_settings()
-    configure_logging(level=settings.log_level, json_output=settings.log_json)
-    uvicorn.run(
-        "backend.main:app",
-        host=settings.host,
-        port=settings.port,
-        reload=not settings.is_production,
-    )
-
-
-if __name__ == "__main__":  # pragma: no cover
-    main()

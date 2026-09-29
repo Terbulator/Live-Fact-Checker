@@ -165,24 +165,3 @@ class UnavailableVerificationEngine(VerificationEngine):
             "the mock pipeline, or inject VerificationServiceEngine.",
             claimId=claim.claimId,
         )
-
-
-class StaticVerificationEngine(VerificationEngine):
-    """Test double that returns a fixed verdict per claim text."""
-
-    name = "static-verification-engine"
-
-    def __init__(self, default_verdict: Verdict = Verdict.UNVERIFIABLE) -> None:
-        self._default_verdict = default_verdict
-
-    async def verify(self, claim: ClaimEvent) -> VerificationEvent:
-        return VerificationEvent(
-            type="verification",
-            claimId=claim.claimId,
-            sessionId=claim.sessionId,
-            speaker=claim.speaker,
-            timestamp=claim.timestamp,
-            verdict=self._default_verdict,
-            reason="Static verification engine; no evidence lookup performed.",
-            source="https://example.com/static",
-        )

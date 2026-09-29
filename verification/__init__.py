@@ -14,8 +14,10 @@ from verification.models import (
 from verification.query_generator import clean_conversational_text, generate_search_query
 from verification.retriever import (
     EvidenceRetriever,
-    MockRetriever,
+    RetrieverConfigurationError,
+    RetrieverError,
     WebSearchRetriever,
+    create_default_retriever,
 )
 from verification.service import VerificationService, verify_claim_event
 
@@ -29,6 +31,9 @@ __all__ = [
     "EvidenceRetriever",
     "MockRetriever",
     "WebSearchRetriever",
+    "create_default_retriever",
+    "RetrieverError",
+    "RetrieverConfigurationError",
     "VerificationChecker",
     "verify_claim_against_evidence",
     "VerificationService",

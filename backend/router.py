@@ -28,9 +28,7 @@ owned by :class:`~backend.session_manager.SessionManager`:
   second time, whichever path delivers it again
 """
 
-from __future__ import annotations
-
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Tuple
 
 from backend.adapters.claim_engine import ClaimEngine, ClaimEngineError
 from backend.adapters.verification import VerificationEngine, VerificationEngineError
@@ -87,7 +85,7 @@ class EventRouter:
             ``(counts, claims, verifications)``.
         """
         session_id = transcript.sessionId
-        await self.sessions.record_transcript(session_id)
+        await self.sessions.bump(session_id, "transcriptCount")
         log_trace(
             TRANSCRIPT_RECEIVED,
             sessionId=session_id,
@@ -96,6 +94,11 @@ class EventRouter:
             textLength=len(transcript.text),
         )
         await self.broadcast(session_id, transcript)
+
+        # An AssemblyAI realtime stream sends growing interim segments. They are
+        # broadcast and counted, but only a finalized line may be claim-checked.
+        if not transcript.isFinal:
+            return PipelineCounts(), [], []
 
         try:
             claims = await self.claim_engine.extract_claims(transcript)
@@ -136,7 +139,7 @@ class EventRouter:
                 )
                 continue
             fresh += 1
-            await self.sessions.record_claims(session_id)
+            await self.sessions.bump(session_id, "claimCount")
             log_trace(
                 CLAIM_CREATED,
                 sessionId=session_id,
@@ -205,7 +208,7 @@ class EventRouter:
             update={"claimId": claim.claimId, "sessionId": session_id}
         )
         await self.sessions.store_verification(session_id, verification)
-        await self.sessions.record_verifications(session_id)
+        await self.sessions.bump(session_id, "verificationCount")
         log_trace(
             VERIFICATION_COMPLETED,
             sessionId=session_id,
@@ -239,7 +242,7 @@ class EventRouter:
                 [existing] if existing is not None else []
             )
 
-        await self.sessions.record_claims(session_id)
+        await self.sessions.bump(session_id, "claimCount")
         log_trace(
             CLAIM_CREATED,
             sessionId=session_id,
@@ -290,7 +293,7 @@ class EventRouter:
             return existing, 0, True
 
         await self.sessions.store_verification(session_id, verification)
-        await self.sessions.record_verifications(session_id)
+        await self.sessions.bump(session_id, "verificationCount")
         log_trace(
             VERIFICATION_COMPLETED,
             sessionId=session_id,
@@ -306,9 +309,6 @@ class EventRouter:
     async def broadcast(self, session_id: str, event) -> int:
         """Broadcast any event to a session's frontend clients."""
         return await self.websockets.send_to_session(session_id, event)
-
-    async def broadcast_many(self, session_id: str, events: Sequence) -> int:
-        return await self.websockets.broadcast(session_id, events)
 
     async def emit_error(
         self,
@@ -330,7 +330,7 @@ class EventRouter:
             detail=detail,
         )
         if session_id:
-            await self.sessions.record_error(session_id)
+            await self.sessions.bump(session_id, "errorCount")
             await self.broadcast(session_id, event)
         logger.warning(
             "Backend error event emitted: %s (%s)",

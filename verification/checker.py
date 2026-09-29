@@ -39,6 +39,25 @@ CONFLICT_SIGNALS = [
 ]
 
 
+NUM_WORD_MAP = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    "ten": "10", "twelve": "12", "fifteen": "15", "twenty": "20",
+    "hundred": "100", "thousand": "1000", "million": "1000000", "billion": "1000000000",
+}
+
+
+def extract_numerical_tokens(text: str) -> set:
+    """Extracts numeric values and quantity terms from text."""
+    tokens = set()
+    for word in re.findall(r"\b\w+(?:\.\w+)?%?\b", text.lower()):
+        if word in NUM_WORD_MAP:
+            tokens.add(NUM_WORD_MAP[word])
+        elif re.match(r"^\d+(?:\.\d+)?%?$", word):
+            tokens.add(word)
+    return tokens
+
+
 class VerificationChecker:
     """Evaluates claims against retrieved evidence snippets."""
 
@@ -59,8 +78,11 @@ class VerificationChecker:
                 "No source available",
             )
 
-        # Filter out extremely low-confidence noise
-        usable_evidence = [e for e in evidence if e.confidence >= self.min_confidence_threshold]
+        # Filter out empty snippets or extremely low-confidence noise
+        usable_evidence = [
+            e for e in evidence
+            if e.confidence >= self.min_confidence_threshold and e.snippet and e.snippet.strip()
+        ]
         if not usable_evidence:
             return (
                 VerdictType.UNVERIFIABLE,
@@ -122,7 +144,7 @@ class VerificationChecker:
     def _heuristic_analysis(
         self, claim: str, evidence: List[EvidenceItem]
     ) -> Tuple[VerdictType, str, str]:
-        """Fallback heuristic evaluation based on lexical overlap and contradiction markers."""
+        """Fallback heuristic evaluation based on lexical overlap, numerical data, and contradiction markers."""
         primary = evidence[0]
         snippet_lower = primary.snippet.lower()
         claim_lower = claim.lower()
@@ -134,6 +156,19 @@ class VerificationChecker:
         evidence_words = set(re.findall(r"\w+", snippet_lower))
         overlap = len(claim_words.intersection(evidence_words))
 
+        # Numerical comparison check
+        claim_nums = extract_numerical_tokens(claim)
+        evidence_nums = extract_numerical_tokens(primary.snippet)
+
+        if claim_nums and evidence_nums and overlap >= 2:
+            # If the numbers conflict on the same topic -> FALSE
+            if not claim_nums.intersection(evidence_nums):
+                return (
+                    VerdictType.FALSE,
+                    "The available source reports a different figure or contradictory data.",
+                    primary.source_url,
+                )
+
         if is_refuted and overlap >= 2:
             return (
                 VerdictType.FALSE,
@@ -142,6 +177,13 @@ class VerificationChecker:
             )
 
         if overlap >= max(2, len(claim_words) // 2):
+            # If the claim made a specific numerical assertion that wasn't corroborated by numbers
+            if claim_nums and not evidence_nums:
+                return (
+                    VerdictType.UNVERIFIABLE,
+                    "Available evidence does not corroborate the specific figures in this claim.",
+                    primary.source_url,
+                )
             return (
                 VerdictType.TRUE,
                 "Authoritative sources corroborate the key facts of this statement.",

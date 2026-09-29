@@ -8,7 +8,6 @@ ClaimEvent
 → VerificationEvent (with original claimId strictly preserved)
 """
 
-import json
 import sys
 from pathlib import Path
 from typing import List, Optional, Union
@@ -21,7 +20,7 @@ if str(project_root) not in sys.path:
 from verification.checker import VerificationChecker
 from verification.models import ClaimEvent, VerificationEvent
 from verification.query_generator import generate_search_query
-from verification.retriever import EvidenceRetriever, MockRetriever
+from verification.retriever import EvidenceRetriever, MockRetriever, create_default_retriever
 
 
 class VerificationService:
@@ -35,28 +34,44 @@ class VerificationService:
         """Initializes the verification service with configurable retriever and checker.
 
         Args:
-            retriever: EvidenceRetriever implementation (defaults to MockRetriever).
+            retriever: EvidenceRetriever implementation (defaults to create_default_retriever()).
             checker: VerificationChecker implementation (defaults to standard checker).
         """
-        self.retriever = retriever if retriever is not None else MockRetriever()
+        self.retriever = retriever if retriever is not None else create_default_retriever()
         self.checker = checker if checker is not None else VerificationChecker()
 
-    def verify_claim(self, claim_input: Union[ClaimEvent, dict]) -> VerificationEvent:
+    def verify_claim(self, claim_input: Union[ClaimEvent, dict, object]) -> VerificationEvent:
         """Runs a single ClaimEvent through the verification pipeline.
 
+        Supports ClaimEvent instances, dictionaries adhering to the contract,
+        or any object with a .model_dump() / .dict() method.
+
         Args:
-            claim_input: A ClaimEvent instance or a raw dictionary adhering to the contract.
+            claim_input: Input claim data.
 
         Returns:
             A VerificationEvent with preserved claimId and determined verdict.
         """
         # 1. Parse & validate input contract
-        if isinstance(claim_input, dict):
-            claim_event = ClaimEvent(**claim_input)
-        elif isinstance(claim_input, ClaimEvent):
+        if isinstance(claim_input, ClaimEvent):
             claim_event = claim_input
+        elif isinstance(claim_input, dict):
+            # Extract standard contract fields to allow friendly forwarding from other modules
+            contract_keys = {"type", "claimId", "speaker", "claim", "timestamp"}
+            filtered_payload = {k: v for k, v in claim_input.items() if k in contract_keys}
+            claim_event = ClaimEvent(**filtered_payload)
+        elif hasattr(claim_input, "model_dump"):
+            dumped = claim_input.model_dump()
+            contract_keys = {"type", "claimId", "speaker", "claim", "timestamp"}
+            filtered_payload = {k: v for k, v in dumped.items() if k in contract_keys}
+            claim_event = ClaimEvent(**filtered_payload)
+        elif hasattr(claim_input, "dict"):
+            dumped = claim_input.dict()
+            contract_keys = {"type", "claimId", "speaker", "claim", "timestamp"}
+            filtered_payload = {k: v for k, v in dumped.items() if k in contract_keys}
+            claim_event = ClaimEvent(**filtered_payload)
         else:
-            raise TypeError(f"Expected ClaimEvent or dict, received {type(claim_input)}")
+            raise TypeError(f"Expected ClaimEvent, dict, or Pydantic model; received {type(claim_input)}")
 
         # 2. Query generation
         query = generate_search_query(claim_event.claim)
@@ -76,36 +91,23 @@ class VerificationService:
             source=source,
         )
 
-    def verify_batch(self, claims: List[Union[ClaimEvent, dict]]) -> List[VerificationEvent]:
+    def verify_claim_dict(self, claim_input: Union[ClaimEvent, dict, object]) -> dict:
+        """Convenience method returning a plain dictionary matching VerificationEvent contract."""
+        return self.verify_claim(claim_input).model_dump()
+
+    def verify_batch(self, claims: List[Union[ClaimEvent, dict, object]]) -> List[VerificationEvent]:
         """Runs a sequence of claims through the verification pipeline."""
         return [self.verify_claim(c) for c in claims]
 
+    def verify_batch_dict(self, claims: List[Union[ClaimEvent, dict, object]]) -> List[dict]:
+        """Runs a sequence of claims and returns plain dictionaries."""
+        return [self.verify_claim_dict(c) for c in claims]
+
 
 def verify_claim_event(
-    claim_input: Union[ClaimEvent, dict],
+    claim_input: Union[ClaimEvent, dict, object],
     retriever: Optional[EvidenceRetriever] = None,
 ) -> VerificationEvent:
     """Convenience functional interface for verifying a single claim."""
     service = VerificationService(retriever=retriever)
     return service.verify_claim(claim_input)
-
-
-if __name__ == "__main__":
-    from verification.mock_data import MOCK_CLAIMS
-
-    print("=" * 70)
-    print("LIVE FACT-CHECKER - VERIFICATION MODULE DEMO")
-    print("=" * 70)
-
-    service = VerificationService()
-
-    for idx, claim_data in enumerate(MOCK_CLAIMS, start=1):
-        print(f"\n[Test Case {idx}]")
-        print(f"Input ClaimEvent:")
-        print(json.dumps(claim_data, indent=2))
-
-        result = service.verify_claim(claim_data)
-
-        print(f"Output VerificationEvent:")
-        print(json.dumps(result.model_dump(), indent=2))
-        print("-" * 50)

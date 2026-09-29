@@ -17,7 +17,6 @@ from backend.adapters.claim_engine import (
 from backend.adapters.verification import (
     VERDICT_TO_WIRE,
     WIRE_TO_VERDICT,
-    StaticVerificationEngine,
     UnavailableVerificationEngine,
     VerificationEngine,
     VerificationEngineError,
@@ -35,7 +34,6 @@ __all__ = [
     "VerificationEngine",
     "VerificationEngineError",
     "VerificationServiceEngine",
-    "StaticVerificationEngine",
     "UnavailableVerificationEngine",
     "VERDICT_TO_WIRE",
     "WIRE_TO_VERDICT",
