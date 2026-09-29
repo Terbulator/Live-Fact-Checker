@@ -28,6 +28,10 @@ export interface AssemblyAIClientOptions {
   onError?: (error: Error) => void;
   onClose?: () => void;
   sampleRate?: number;
+  /** Optional callback to fetch a fresh token before reconnecting.
+   *  If provided, this will be called before each reconnection attempt.
+   *  This is important because AssemblyAI tokens are short-lived and single-use. */
+  getToken?: () => Promise<string>;
 }
 
 /** AssemblyAI v3 streaming message types */
@@ -108,8 +112,20 @@ export class AssemblyAIClient {
 
   /** Connect to AssemblyAI v3 streaming WebSocket */
   async connect(): Promise<void> {
+    // Allow fetching a fresh token before connecting (especially for reconnect)
+    let token = this.options.token;
+    if (this.options.getToken) {
+      try {
+        token = await this.options.getToken();
+      } catch (err) {
+        console.error('[AssemblyAI] Failed to fetch fresh token:', err);
+        this.options.onError?.(new Error('Failed to fetch AssemblyAI token'));
+        return;
+      }
+    }
+
     // v3 streaming endpoint with token as query parameter
-    const wsUrl = `wss://streaming.assemblyai.com/v3/ws?token=${encodeURIComponent(this.options.token)}`;
+    const wsUrl = `wss://streaming.assemblyai.com/v3/ws?token=${encodeURIComponent(token)}`;
     this.ws = new WebSocket(wsUrl);
 
     this.ws.onopen = () => {

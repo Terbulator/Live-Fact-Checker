@@ -16,9 +16,13 @@ idempotent and lifecycle-safe:
   when the session stops
 
 Deployments must therefore run a single backend instance. See the README.
+
+Session IDs are cryptographically secure random strings to prevent session
+hijacking via prediction.
 """
 
 import asyncio
+import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
@@ -31,6 +35,15 @@ logger = get_logger("session_manager")
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _generate_session_id() -> str:
+    """Generate a cryptographically secure session ID.
+
+    Uses URL-safe base64 encoding of 24 random bytes (192 bits of entropy),
+    yielding a 32-character string that is unpredictable and collision-resistant.
+    """
+    return secrets.token_urlsafe(24)
 
 
 @dataclass
@@ -115,12 +128,9 @@ class SessionManager:
     consistent when several WebSocket clients and HTTP requests interleave.
     """
 
-    def __init__(self, id_prefix: str = "session_", id_width: int = 3) -> None:
+    def __init__(self) -> None:
         self._sessions: Dict[str, Session] = {}
         self._lock = asyncio.Lock()
-        self._id_prefix = id_prefix
-        self._id_width = id_width
-        self._counter = 0
         # (sessionId, claimId) -> event. Keyed by both because a claim id
         # minted by a teammate or by the mock engine recurs across sessions.
         self._claims: Dict[Tuple[str, str], ClaimEvent] = {}
@@ -128,14 +138,10 @@ class SessionManager:
         self._background: Dict[str, "asyncio.Task[None]"] = {}
 
     # -- id generation ----------------------------------------------------
-    def _next_session_id(self) -> str:
-        """Return the next monotonically increasing session id.
-
-        Ids are deterministic (``session_001``, ``session_002``, ...) so the
-        mock pipeline and the documented examples stay reproducible.
-        """
-        self._counter += 1
-        return f"{self._id_prefix}{self._counter:0{self._id_width}d}"
+    @staticmethod
+    def _next_session_id() -> str:
+        """Return a cryptographically secure random session id."""
+        return _generate_session_id()
 
     # -- lifecycle --------------------------------------------------------
     async def create(self) -> Session:

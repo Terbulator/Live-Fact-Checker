@@ -185,7 +185,7 @@ class TestAssemblyAIClient(unittest.TestCase):
 
         mock_turn_event = MagicMock()
         mock_turn_event.transcript = "Hello world"
-        type(mock_turn_event).turn_is_formatted = PropertyMock(return_value=True)
+        type(mock_turn_event).end_of_turn = PropertyMock(return_value=True)
         type(mock_turn_event).speaker_label = PropertyMock(return_value="Speaker A")
         type(mock_turn_event).end_time = PropertyMock(return_value=12.4)
         mock_turn_event.words = [
@@ -262,7 +262,7 @@ class TestAssemblyAIClient(unittest.TestCase):
 
         mock_turn_event = MagicMock()
         mock_turn_event.transcript = "Hello"
-        type(mock_turn_event).turn_is_formatted = PropertyMock(return_value=True)
+        type(mock_turn_event).end_of_turn = PropertyMock(return_value=True)
         type(mock_turn_event).speaker_label = PropertyMock(return_value="PENDING")
         type(mock_turn_event).end_time = PropertyMock(return_value=5.0)
         mock_turn_event.words = [MockWord(start=1000, end=2000, text="Hello")]
@@ -299,7 +299,7 @@ class TestAssemblyAIClient(unittest.TestCase):
 
         mock_turn_event = MagicMock()
         mock_turn_event.transcript = "Hello"
-        type(mock_turn_event).turn_is_formatted = PropertyMock(return_value=True)
+        type(mock_turn_event).end_of_turn = PropertyMock(return_value=True)
         type(mock_turn_event).speaker_label = PropertyMock(return_value=None)
         type(mock_turn_event).end_time = PropertyMock(return_value=5.0)
         mock_turn_event.words = [MockWord(start=1000, end=2000, text="Hello")]
@@ -336,7 +336,7 @@ class TestAssemblyAIClient(unittest.TestCase):
 
         mock_turn_event = MagicMock()
         mock_turn_event.transcript = "Hello"
-        type(mock_turn_event).turn_is_formatted = PropertyMock(return_value=True)
+        type(mock_turn_event).end_of_turn = PropertyMock(return_value=True)
         type(mock_turn_event).speaker_label = PropertyMock(return_value="Speaker A")
         type(mock_turn_event).end_time = PropertyMock(return_value=None)
         mock_turn_event.words = []

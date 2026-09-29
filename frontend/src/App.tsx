@@ -133,7 +133,7 @@ export default function App() {
           onClearErrors={clearErrors}
         />
 
-        <VerdictScoreboard claims={view.claims} />
+        <VerdictScoreboard claims={view.claims} isLive={isLive} />
 
         <div className="app__columns">
           <TranscriptPanel lines={view.transcripts} activeKey={activeLineKey} />

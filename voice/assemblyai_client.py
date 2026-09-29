@@ -143,7 +143,9 @@ class AssemblyAIClient:
         if not event.transcript:
             return
 
-        is_final = getattr(event, "turn_is_formatted", False) is True
+        # Use end_of_turn for finality detection (correct semantic signal per v3 API)
+        # turn_is_formatted relates to text formatting, not turn completion
+        is_final = getattr(event, "end_of_turn", False) is True
 
         # Get AssemblyAI speaker label
         raw_speaker = getattr(event, "speaker_label", None)

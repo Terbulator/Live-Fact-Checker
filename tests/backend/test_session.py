@@ -20,7 +20,7 @@ def test_session_creation_returns_backend_owned_id(client: TestClient) -> None:
 
     body = response.json()
     assert body["type"] == "session"
-    assert body["sessionId"].startswith("session_")
+    assert isinstance(body["sessionId"], str) and len(body["sessionId"]) > 0
     assert body["status"] in {"started", "connected"}
     assert body["createdAt"]
     assert body["updatedAt"]
@@ -31,7 +31,7 @@ def test_session_creation_returns_backend_owned_id(client: TestClient) -> None:
 def test_session_creation_accepts_empty_body(client: TestClient) -> None:
     response = client.post("/session/start")
     assert response.status_code == 201
-    assert response.json()["sessionId"].startswith("session_")
+    assert isinstance(response.json()["sessionId"], str) and len(response.json()["sessionId"]) > 0
 
 
 def test_session_ids_are_unique(client: TestClient) -> None:
@@ -123,7 +123,7 @@ def test_session_start_tracks_the_mock_pipeline_task(client: TestClient) -> None
     session = client.post(
         "/session/start", json={"startMockPipeline": True}
     ).json()["sessionId"]
-    assert session.startswith("session_")
+    assert isinstance(session, str) and len(session) > 0
 
 
 def test_session_stop_cancels_the_mock_pipeline_task() -> None:

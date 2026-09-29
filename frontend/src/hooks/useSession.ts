@@ -10,8 +10,7 @@
  * only *starts*, *watches* and *stops*.
  */
 
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
-
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ApiError, getSession, startSession, stopSession } from '../lib/api'
 import { resolveWsUrl } from '../lib/config'
 import { liveViewReducer } from '../lib/reducer'
@@ -52,8 +51,19 @@ export function useSession(): UseSessionResult {
   const [phase, setPhase] = useState<SessionPhase>('idle')
   const [fault, setFault] = useState<string | null>(null)
   const [view, dispatch] = useReducer(liveViewReducer, initialLiveView)
+  const processedEventIdsRef = useRef<Set<string>>(new Set())
 
   const handleEvent = useCallback((event: ServerEvent) => {
+    if (event.type === 'pong') {
+      dispatch({ type: 'event', event })
+      return
+    }
+
+    if (processedEventIdsRef.current.has(event.eventId)) {
+      return
+    }
+
+    processedEventIdsRef.current.add(event.eventId)
     dispatch({ type: 'event', event })
   }, [])
 
@@ -76,6 +86,7 @@ export function useSession(): UseSessionResult {
       // Clear the previous session's transcript, claims and verdicts before the
       // new stream arrives, so repeated demos never show merged results.
       // Results stay visible while idle, and are replaced on the next start.
+      processedEventIdsRef.current.clear()
       dispatch({ type: 'reset' })
       try {
         const created = await startSession(options?.demo ?? false)

@@ -18,10 +18,14 @@ Two deliberate design notes:
    contract is still validated strictly, but an additional field from a
    teammate logs a ``SCHEMA_VALIDATION_FAILED``-style warning instead of
    breaking the live demo. See :func:`unknown_fields`.
+
+3. **Every event carries an ``eventId``** for deduplication and tracing.
+   The backend generates one if not provided by the sender.
 """
 
 from datetime import datetime, timezone
 from enum import Enum
+import secrets
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -32,6 +36,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 #: Default websocket path template, exposed so the frontend and docs agree.
 WS_PATH_TEMPLATE = "/ws/session/{session_id}"
+
+
+def _generate_event_id() -> str:
+    """Generate a cryptographically secure event ID."""
+    return secrets.token_urlsafe(16)
 
 
 class Verdict(str, Enum):
@@ -107,6 +116,7 @@ class TranscriptEvent(EventModel):
     """
 
     type: str = Field(default="transcript")
+    eventId: str = Field(default_factory=_generate_event_id)
     sessionId: str = Field(..., min_length=1)
     speaker: Optional[str] = Field(default="Speaker 1")
     text: str = Field(..., min_length=1)
@@ -151,6 +161,7 @@ class ClaimEvent(EventModel):
     """
 
     type: str = Field(default="claim")
+    eventId: str = Field(default_factory=_generate_event_id)
     claimId: str = Field(..., min_length=1)
     sessionId: str = Field(..., min_length=1)
     speaker: Optional[str] = Field(default="Speaker 1")
@@ -194,6 +205,7 @@ class VerificationEvent(EventModel):
     """
 
     type: str = Field(default="verification")
+    eventId: str = Field(default_factory=_generate_event_id)
     claimId: str = Field(..., min_length=1)
     sessionId: str = Field(..., min_length=1)
     speaker: Optional[str] = Field(default="Speaker 1")
@@ -248,6 +260,7 @@ class ErrorEvent(EventModel):
     """
 
     type: str = Field(default="error")
+    eventId: str = Field(default_factory=_generate_event_id)
     sessionId: Optional[str] = None
     code: ErrorCode = Field(default=ErrorCode.INTERNAL_ERROR)
     message: str = Field(..., min_length=1)
@@ -277,6 +290,7 @@ class SessionEvent(EventModel):
     """
 
     type: str = Field(default="session")
+    eventId: str = Field(default_factory=_generate_event_id)
     sessionId: str = Field(..., min_length=1)
     status: SessionEventStatus = Field(...)
     detail: Optional[str] = Field(default=None)
