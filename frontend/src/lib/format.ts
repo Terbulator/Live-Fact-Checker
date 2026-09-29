@@ -1,0 +1,95 @@
+/**
+ * Display helpers shared by the transcript, claim cards and status bar.
+ *
+ * Kept in one place so a timestamp, speaker label or source domain looks
+ * identical everywhere it appears.
+ */
+
+import type { Verdict } from '../types/events'
+
+/** Format an audio offset in seconds as a debate-style clock, e.g. `1:23.4`. */
+export function formatClock(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00.0'
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds - minutes * 60
+  return `${minutes}:${remainder.toFixed(1).padStart(4, '0')}`
+}
+
+/** Normalise a speaker label for display, with a stable fallback. */
+export function displaySpeaker(speaker: string | null | undefined): string {
+  if (speaker === null || speaker === undefined) return 'Unknown speaker'
+  const trimmed = speaker.trim()
+  return trimmed === '' ? 'Unknown speaker' : trimmed
+}
+
+/** First letters of a speaker label, for the avatar chip. */
+export function speakerInitials(speaker: string | null | undefined): string {
+  const label = displaySpeaker(speaker)
+  const words = label.split(/\s+/).filter(Boolean)
+  const first = words[0]?.[0] ?? '?'
+  const second = words.length > 1 ? (words[words.length - 1]?.[0] ?? '') : ''
+  return (first + second).toUpperCase()
+}
+
+/** A short, stable numeric index for a speaker, for colour assignment. */
+export function speakerIndex(speaker: string | null | undefined, order: string[]): number {
+  const label = displaySpeaker(speaker)
+  const at = order.indexOf(label)
+  return at === -1 ? 0 : at
+}
+
+/**
+ * Extract a display domain from a source reference.
+ *
+ * The backend's `source` is free text and may legitimately be a bare string
+ * such as "No source available", so this never throws.
+ */
+export function sourceDomain(source: string): string {
+  try {
+    const url = new URL(source)
+    return url.hostname.replace(/^www\./, '')
+  } catch {
+    return source
+  }
+}
+
+/** Whether a source is a real URL and can therefore be linked. */
+export function isLinkableSource(source: string): boolean {
+  try {
+    const parsed = new URL(source)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+/** Counters summarising the verdicts resolved so far. */
+export interface VerdictTally {
+  true: number
+  false: number
+  unverifiable: number
+  /** Verdict of the most recently resolved claim, for the hero display. */
+  latest: Verdict | null
+}
+
+export function tallyVerdicts(
+  claims: ReadonlyArray<{ verification: { verdict: Verdict } | null }>,
+): VerdictTally {
+  const tally: VerdictTally = {
+    true: 0,
+    false: 0,
+    unverifiable: 0,
+    latest: null,
+  }
+
+  for (const card of claims) {
+    const verdict = card.verification?.verdict
+    if (verdict === 'TRUE') tally.true += 1
+    else if (verdict === 'FALSE') tally.false += 1
+    else if (verdict === 'UNVERIFIABLE') tally.unverifiable += 1
+    else continue
+    tally.latest = verdict
+  }
+
+  return tally
+}

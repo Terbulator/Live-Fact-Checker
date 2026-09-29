@@ -78,6 +78,7 @@ class AssemblyAIClient:
         on_transcript: Optional[Callable[[TranscriptEvent], None]] = None,
         backend_base_url: Optional[str] = None,
         use_backend: bool = True,
+        session_id: Optional[str] = None,
     ):
         api_key = os.getenv("ASSEMBLYAI_API_KEY")
 
@@ -86,7 +87,12 @@ class AssemblyAIClient:
 
         self.on_transcript = on_transcript
         self.use_backend = use_backend
-        self.backend_client = BackendClient(backend_base_url) if use_backend else None
+        # When session_id is supplied the client joins that existing session
+        # instead of asking the backend to mint one, so transcripts land in the
+        # same session the browser dashboard is watching.
+        self.backend_client = (
+            BackendClient(backend_base_url, session_id=session_id) if use_backend else None
+        )
         self.session_id: Optional[str] = None
         
         # Speaker label mapping: AssemblyAI labels (A, B, C, etc.) -> Speaker 1, Speaker 2, etc.
@@ -209,11 +215,22 @@ class AssemblyAIClient:
         print(f"[AssemblyAI] Session terminated: {event}")
 
     def connect(self):
-        # Start backend session first (only if using backend)
+        # Start or join the backend session first (only if using backend).
         if self.use_backend:
             self._async_loop.start()
-            self.session_id = self._async_loop.submit(self.backend_client.start_session()).result(timeout=10.0)
-            print(f"[Backend] Session started: {self.session_id}")
+            joined = self.backend_client.joined_session_id
+            if joined is not None:
+                # Fail fast on a bad id instead of streaming into nothing.
+                self._async_loop.submit(self.backend_client.verify_session(joined)).result(
+                    timeout=10.0
+                )
+            self.session_id = self._async_loop.submit(
+                self.backend_client.start_session()
+            ).result(timeout=10.0)
+            if joined is not None:
+                print(f"[Backend] Joined existing session: {self.session_id}")
+            else:
+                print(f"[Backend] Session started: {self.session_id}")
         else:
             # For standalone mode, generate a local session ID
             self.session_id = "standalone"
@@ -232,8 +249,19 @@ class AssemblyAIClient:
         self.client.disconnect()
         if self.use_backend and self.session_id:
             try:
-                self._async_loop.submit(self.backend_client.stop_session(self.session_id)).result(timeout=10.0)
-                print(f"[Backend] Session stopped: {self.session_id}")
+                # Only stop a session this client created. A joined session
+                # belongs to whoever started it, and ending it on Ctrl+C would
+                # cut the browser off mid-demo.
+                if self.backend_client.owns_session:
+                    self._async_loop.submit(
+                        self.backend_client.stop_session(self.session_id)
+                    ).result(timeout=10.0)
+                    print(f"[Backend] Session stopped: {self.session_id}")
+                else:
+                    print(
+                        f"[Backend] Left session {self.session_id} open "
+                        f"(owned by another client)."
+                    )
             except Exception as e:
                 print(f"[Backend ERROR] Failed to stop session: {e}")
             finally:

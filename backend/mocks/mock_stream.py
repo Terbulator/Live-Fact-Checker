@@ -180,8 +180,68 @@ def build_mock_transcript(
     )
 
 
+def build_mock_transcripts(
+    session_id: str, count: Optional[int] = None
+) -> List[TranscriptEvent]:
+    """Build the scripted transcript events for a session.
+
+    Args:
+        session_id: Session the events belong to.
+        count: How many segments to build. Defaults to the whole script.
+    """
+    total = len(MOCK_TRANSCRIPT_SCRIPT) if count is None else count
+    return [build_mock_transcript(session_id, i + 1) for i in range(total)]
+
+
+async def _await_first_client(
+    websocket_manager,
+    session_id: str,
+    timeout: float,
+    poll_interval: float = 0.025,
+) -> bool:
+    """Wait until a WebSocket client attaches, up to ``timeout`` seconds.
+
+    The browser learns its ``sessionId`` from the ``POST /session/start``
+    response and can only open its socket afterwards, so a pipeline that starts
+    emitting immediately races that handshake and loses its first events. This
+    closes the race by holding the first event until a viewer is listening.
+
+    Returns ``True`` once a client is attached, ``False`` on timeout or if the
+    session ends first. A timeout is not an error: the stream still runs, so a
+    headless test that never opens a socket is unaffected.
+    """
+    if websocket_manager is None or timeout <= 0:
+        return True
+
+    waited = 0.0
+    while waited < timeout:
+        if websocket_manager.connection_count(session_id) > 0:
+            logger.info(
+                "Mock pipeline has a viewer for %s after %.3fs",
+                session_id,
+                waited,
+                extra={"trace": "MOCK_PIPELINE_VIEWER", "sessionId": session_id},
+            )
+            return True
+        await asyncio.sleep(poll_interval)
+        waited += poll_interval
+
+    logger.info(
+        "Mock pipeline started without a viewer for %s after %.1fs; events may be missed",
+        session_id,
+        timeout,
+        extra={"trace": "MOCK_PIPELINE_NO_VIEWER", "sessionId": session_id},
+    )
+    return False
+
+
 async def stream_mock_transcripts(
-    router, session_manager: SessionManager, session_id: str, delay: float = 0.35
+    router,
+    session_manager: SessionManager,
+    session_id: str,
+    delay: float = 0.35,
+    websocket_manager=None,
+    wait_for_client_timeout: float = 5.0,
 ) -> None:
     """Push the scripted transcript script through the router with pacing.
 
@@ -190,8 +250,16 @@ async def stream_mock_transcripts(
     it stops emitting as soon as the session is gone or stopped, and it
     re-raises :class:`asyncio.CancelledError` so the owner can await a clean
     cancellation instead of a task destroyed while pending.
+
+    When ``websocket_manager`` is supplied the first event is held until a
+    client attaches (or ``wait_for_client_timeout`` elapses), so a browser that
+    opens its socket a moment after ``/session/start`` still receives the whole
+    script. No event contract changes; only the emission timing does.
     """
     try:
+        if websocket_manager is not None:
+            await _await_first_client(websocket_manager, session_id, wait_for_client_timeout)
+
         for index in range(len(MOCK_TRANSCRIPT_SCRIPT)):
             if delay:
                 await asyncio.sleep(delay)

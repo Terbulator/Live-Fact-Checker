@@ -1,0 +1,335 @@
+/**
+ * Tests for AssemblyAI client (v3 streaming API)
+ */
+
+import { AssemblyAIClient, postTranscriptToBackend } from './assemblyai';
+import { vi } from 'vitest';
+
+// Store sent messages globally for testing
+const sentMessages: string[] = [];
+
+// Mock WebSocket globally
+class MockWebSocket {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+
+  readyState = MockWebSocket.CONNECTING;
+  onopen: (() => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+
+  constructor(public url: string) {
+    sentMessages.length = 0;
+    // Simulate async connection
+    setTimeout(() => {
+      this.readyState = MockWebSocket.OPEN;
+      this.onopen?.();
+    }, 0);
+  }
+
+  send(data: string) {
+    sentMessages.push(data);
+  }
+
+  close(code?: number, reason?: string) {
+    this.readyState = MockWebSocket.CLOSED;
+    this.onclose?.(new CloseEvent('close', { code, reason }));
+  }
+
+  simulateMessage(data: object) {
+    this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(data) }));
+  }
+
+  simulateError() {
+    this.onerror?.(new Event('error'));
+  }
+}
+
+global.WebSocket = MockWebSocket as any;
+
+// Mock fetch
+const mockFetch = vi.fn();
+global.fetch = mockFetch;
+
+describe('AssemblyAIClient (v3)', () => {
+  let client: AssemblyAIClient;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetch.mockReset();
+    sentMessages.length = 0;
+    
+    client = new AssemblyAIClient({
+      token: 'test-token',
+      sessionId: 'test-session',
+      onTranscript: vi.fn(),
+      onError: vi.fn(),
+      onClose: vi.fn(),
+    });
+  });
+
+  it('connects to AssemblyAI v3 streaming WebSocket', async () => {
+    await client.connect();
+    
+    // Wait for connection
+    await new Promise(r => setTimeout(r, 10));
+    
+    expect(client.connected).toBe(true);
+  });
+
+  it('connects to correct v3 streaming endpoint', async () => {
+    await client.connect();
+    await new Promise(r => setTimeout(r, 10));
+    
+    const ws = (client as any).ws;
+    expect(ws.url).toContain('wss://streaming.assemblyai.com/v3/ws');
+    expect(ws.url).toContain('token=test-token');
+  });
+
+  it('sends configuration on connect with v3 format', async () => {
+    await client.connect();
+    await new Promise(r => setTimeout(r, 10));
+    
+    // Find the config message
+    const configMsg = sentMessages.find(m => 
+      JSON.parse(m).type === 'Configure'
+    );
+    expect(configMsg).toBeDefined();
+    
+    const parsed = JSON.parse(configMsg!);
+    expect(parsed.type).toBe('Configure');
+    expect(parsed.sample_rate).toBe(16000);
+    expect(parsed.speaker_labels).toBe(true);
+    expect(parsed.encoding).toBe('pcm_s16le');
+  });
+
+  it('handles Turn message (partial transcript) with v3 format', async () => {
+    const onTranscript = vi.fn();
+    client = new AssemblyAIClient({
+      token: 'test-token',
+      sessionId: 'test-session',
+      onTranscript,
+      onError: vi.fn(),
+      onClose: vi.fn(),
+    });
+
+    await client.connect();
+    await new Promise(r => setTimeout(r, 10));
+
+    // Get the actual WebSocket instance
+    const ws = (client as any).ws;
+    if (ws && ws.simulateMessage) {
+      ws.simulateMessage({
+        type: 'Turn',
+        transcript: 'Hello',
+        end_of_turn: false,
+        turn_is_formatted: false,
+        speaker: 'A',
+        words: [{ start: 1000, end: 2000, text: 'Hello', confidence: 0.9, word_is_final: true }],
+      });
+    }
+
+    expect(onTranscript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'test-session',
+        speaker: 'Speaker 1',
+        text: 'Hello',
+        isFinal: false,
+      })
+    );
+  });
+
+  it('handles Turn message (final transcript) with v3 format', async () => {
+    const onTranscript = vi.fn();
+    client = new AssemblyAIClient({
+      token: 'test-token',
+      sessionId: 'test-session',
+      onTranscript,
+      onError: vi.fn(),
+      onClose: vi.fn(),
+    });
+
+    await client.connect();
+    await new Promise(r => setTimeout(r, 10));
+
+    const ws = (client as any).ws;
+    if (ws && ws.simulateMessage) {
+      ws.simulateMessage({
+        type: 'Turn',
+        transcript: 'Hello world',
+        end_of_turn: true,
+        turn_is_formatted: true,
+        speaker: 'A',
+        words: [
+          { start: 1000, end: 2000, text: 'Hello', confidence: 0.9, word_is_final: true },
+          { start: 2000, end: 3400, text: 'world', confidence: 0.95, word_is_final: true },
+        ],
+      });
+    }
+
+    expect(onTranscript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'test-session',
+        speaker: 'Speaker 1',
+        text: 'Hello world',
+        isFinal: true,
+        timestamp: 3.4,
+      })
+    );
+  });
+
+  it('maps speaker labels correctly with v3 format', async () => {
+    const onTranscript = vi.fn();
+    client = new AssemblyAIClient({
+      token: 'test-token',
+      sessionId: 'test-session',
+      onTranscript,
+      onError: vi.fn(),
+      onClose: vi.fn(),
+    });
+
+    await client.connect();
+    await new Promise(r => setTimeout(r, 10));
+
+    const ws = (client as any).ws;
+    if (ws && ws.simulateMessage) {
+      // First speaker A
+      ws.simulateMessage({
+        type: 'Turn',
+        transcript: 'Hello',
+        end_of_turn: true,
+        turn_is_formatted: true,
+        speaker: 'A',
+        words: [{ start: 1000, end: 2000, text: 'Hello', confidence: 0.9, word_is_final: true }],
+      });
+
+      // Second speaker B
+      ws.simulateMessage({
+        type: 'Turn',
+        transcript: 'Hi there',
+        end_of_turn: true,
+        turn_is_formatted: true,
+        speaker: 'B',
+        words: [{ start: 1000, end: 2000, text: 'Hi there', confidence: 0.9, word_is_final: true }],
+      });
+
+      // Third speaker A again
+      ws.simulateMessage({
+        type: 'Turn',
+        transcript: 'How are you',
+        end_of_turn: true,
+        turn_is_formatted: true,
+        speaker: 'A',
+        words: [{ start: 1000, end: 2000, text: 'How are you', confidence: 0.9, word_is_final: true }],
+      });
+    }
+
+    expect(onTranscript).toHaveBeenCalledTimes(3);
+    expect(onTranscript).toHaveBeenNthCalledWith(1, expect.objectContaining({ speaker: 'Speaker 1' }));
+    expect(onTranscript).toHaveBeenNthCalledWith(2, expect.objectContaining({ speaker: 'Speaker 2' }));
+    expect(onTranscript).toHaveBeenNthCalledWith(3, expect.objectContaining({ speaker: 'Speaker 1' }));
+  });
+
+  it('deduplicates final transcripts', async () => {
+    const onTranscript = vi.fn();
+    client = new AssemblyAIClient({
+      token: 'test-token',
+      sessionId: 'test-session',
+      onTranscript,
+      onError: vi.fn(),
+      onClose: vi.fn(),
+    });
+
+    await client.connect();
+    await new Promise(r => setTimeout(r, 10));
+
+    const ws = (client as any).ws;
+    if (ws && ws.simulateMessage) {
+      // Send same final transcript twice
+      ws.simulateMessage({
+        type: 'Turn',
+        transcript: 'Hello world',
+        end_of_turn: true,
+        turn_is_formatted: true,
+        speaker: 'A',
+        words: [{ start: 1000, end: 2000, text: 'Hello world', confidence: 0.9, word_is_final: true }],
+      });
+
+      ws.simulateMessage({
+        type: 'Turn',
+        transcript: 'Hello world',
+        end_of_turn: true,
+        turn_is_formatted: true,
+        speaker: 'A',
+        words: [{ start: 1000, end: 2000, text: 'Hello world', confidence: 0.9, word_is_final: true }],
+      });
+    }
+
+    // Should only be called once due to deduplication
+    expect(onTranscript).toHaveBeenCalledTimes(1);
+  });
+
+  it('disconnects cleanly', async () => {
+    await client.connect();
+    await new Promise(r => setTimeout(r, 10));
+    
+    client.disconnect();
+    
+    expect(client.connected).toBe(false);
+  });
+});
+
+describe('postTranscriptToBackend', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  it('posts transcript to backend', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true });
+
+    const result = await postTranscriptToBackend({
+      sessionId: 'test-session',
+      speaker: 'Speaker 1',
+      text: 'Hello world',
+      timestamp: 1.5,
+      isFinal: true,
+    });
+
+    expect(result).toBe(true);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:8000/events/transcript',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'transcript',
+          sessionId: 'test-session',
+          speaker: 'Speaker 1',
+          text: 'Hello world',
+          timestamp: 1.5,
+          isFinal: true,
+        }),
+      })
+    );
+  });
+
+  it('returns false on backend error', async () => {
+    mockFetch.mockResolvedValueOnce({ 
+      ok: false, 
+      json: () => Promise.resolve({ detail: 'error' }) 
+    });
+
+    const result = await postTranscriptToBackend({
+      sessionId: 'test-session',
+      speaker: 'Speaker 1',
+      text: 'Hello world',
+      timestamp: 1.5,
+      isFinal: true,
+    });
+
+    expect(result).toBe(false);
+  });
+});

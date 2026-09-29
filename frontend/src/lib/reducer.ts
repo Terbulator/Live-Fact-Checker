@@ -14,6 +14,7 @@
  */
 
 import type { ClaimCard, LiveView, TranscriptLine } from '../types/model'
+import { initialLiveView } from '../types/model'
 import type {
   ClaimEvent,
   ErrorEvent,
@@ -57,6 +58,26 @@ function supersedesInterim(last: TranscriptLine | undefined, incoming: Transcrip
   return (
     last !== undefined && !last.isFinal && last.speaker === incoming.speaker
   )
+}
+
+/**
+ * Find the transcript key a claim was extracted from.
+ *
+ * Uses the same rule as `attachClaimId`: the newest finalized line from the
+ * same speaker. Kept as a separate function so the lookup used for linking is
+ * literally the one used for annotating, rather than a second guess.
+ */
+function findLineKey(
+  lines: TranscriptLine[],
+  event: ClaimEvent,
+): string | null {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]
+    if (line === undefined) continue
+    if (!line.isFinal || line.speaker !== event.speaker) continue
+    return line.key
+  }
+  return null
 }
 
 /**
@@ -104,6 +125,7 @@ function upsertClaim(claims: ClaimCard[], verification: VerificationEvent): Clai
         claimType: 'unspecified',
         pending: false,
         verification,
+        transcriptKey: null,
       },
     ]
   }
@@ -116,18 +138,26 @@ function upsertClaim(claims: ClaimCard[], verification: VerificationEvent): Clai
 }
 
 /** Fold one server event into the next view model. */
-export function applyEvent(view: LiveView, event: ServerEvent): LiveView {  switch (event.type) {
+export function applyEvent(view: LiveView, event: ServerEvent): LiveView {
+  switch (event.type) {
     case 'transcript': {
       const incoming = toLine(event, null)
       const last = view.transcripts[view.transcripts.length - 1]
+      // Any transcript segment, interim or final, means someone is speaking.
+      const speech = { lastSpeechAt: Date.now(), lastSpeaker: event.speaker }
 
       if (supersedesInterim(last, incoming)) {
         return {
           ...view,
+          ...speech,
           transcripts: [...view.transcripts.slice(0, -1), incoming],
         }
       }
-      return { ...view, transcripts: [...view.transcripts, incoming] }
+      return {
+        ...view,
+        ...speech,
+        transcripts: [...view.transcripts, incoming],
+      }
     }
 
     case 'claim': {
@@ -139,6 +169,8 @@ export function applyEvent(view: LiveView, event: ServerEvent): LiveView {  swit
         claimType: event.claimType,
         pending: true,
         verification: null,
+        // Captured now, while we know which line produced this claim.
+        transcriptKey: findLineKey(view.transcripts, event),
       }
       return {
         ...view,
@@ -173,6 +205,7 @@ export function applyEvent(view: LiveView, event: ServerEvent): LiveView {  swit
 export type LiveViewAction =
   | { type: 'event'; event: ServerEvent }
   | { type: 'clearErrors' }
+  | { type: 'reset' }
 
 /**
  * The reducer used with `useReducer`.
@@ -186,6 +219,12 @@ export function liveViewReducer(view: LiveView, action: LiveViewAction): LiveVie
       return applyEvent(view, action.event)
     case 'clearErrors':
       return { ...view, errors: [] }
+    case 'reset':
+      // Starting a new session must not inherit the previous one's transcript,
+      // claims or verdicts. Claim ids are minted by the backend and restart per
+      // process, so two sessions can legitimately reuse the same id; carrying
+      // cards across would merge unrelated results.
+      return initialLiveView
     default:
       return view
   }

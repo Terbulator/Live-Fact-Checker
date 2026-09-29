@@ -27,6 +27,7 @@ from backend.config import Settings, get_settings
 from backend.logging_config import configure_logging, get_logger
 from backend.mocks.mock_stream import MockClaimEngine, MockVerificationEngine
 from backend.router import EventRouter
+from backend.routes import assemblyai as assemblyai_routes
 from backend.routes import events as events_routes
 from backend.routes import health as health_routes
 from backend.routes import session as session_routes
@@ -170,6 +171,7 @@ def create_app(
     app.include_router(health_routes.router)
     app.include_router(session_routes.router)
     app.include_router(events_routes.router)
+    app.include_router(assemblyai_routes.router)
 
     _register_exception_handlers(app)
     _register_websocket_route(app)

@@ -1,21 +1,34 @@
 /**
- * Connection and session status bar.
+ * Connection and session status.
  *
- * Surfaces the two states a user actually needs to trust the demo:
+ * Answers the two questions a viewer has before trusting anything on screen:
+ * is the backend reachable, and is this browser actually receiving its stream.
  *
- * - is the backend reachable at all
- * - is this browser receiving its live event stream
+ * The speech indicator is deliberately loud while audio is arriving and quiet
+ * afterwards, so "someone is talking right now" is legible from across a room.
  */
 
 import type { ConnectionState } from '../hooks/useSessionSocket'
 import type { SessionPhase } from '../hooks/useSession'
+import { displaySpeaker } from '../lib/format'
+
+/** How recently speech must have arrived to still read as "talking". */
+const SPEAKING_WINDOW_MS = 1800
 
 const CONNECTION_LABELS: Record<ConnectionState, string> = {
-  idle: 'Not connected',
-  connecting: 'Connecting',
+  idle: 'Offline',
+  connecting: 'Connecting…',
   open: 'Live',
-  closed: 'Disconnected',
-  error: 'Connection error',
+  closed: 'Reconnecting…',
+  error: 'Connection lost',
+}
+
+const CONNECTION_HINTS: Record<ConnectionState, string> = {
+  idle: 'No session running',
+  connecting: 'Opening the session stream',
+  open: 'Receiving events',
+  closed: 'Reopening the session stream',
+  error: 'Cannot reach the backend',
 }
 
 export interface StatusBarProps {
@@ -24,6 +37,13 @@ export interface StatusBarProps {
   backendUrl: string
   sessionId: string | null
   connectedClients: number | null
+  /** Wall-clock for the speech indicator. */
+  now: number
+  /** Timestamp of the last transcript event, or null. */
+  lastSpeechAt: number | null
+  lastSpeaker: string | null
+  /** Whether the current session is replaying the scripted mock pipeline. */
+  isDemo: boolean
 }
 
 export function StatusBar({
@@ -32,45 +52,73 @@ export function StatusBar({
   backendUrl,
   sessionId,
   connectedClients,
+  now,
+  lastSpeechAt,
+  lastSpeaker,
+  isDemo,
 }: StatusBarProps) {
   const isLive = connection === 'open'
+  const speaking =
+    isLive &&
+    lastSpeechAt !== null &&
+    now - lastSpeechAt < SPEAKING_WINDOW_MS
+
+  // The pill is the single place that says what the pipeline is doing, so it
+  // absorbs the session phase too: while a session is being created there is
+  // nothing on the socket yet, and saying "Listening" would be a lie.
+  let pillLabel: string
+  if (phase === 'starting') pillLabel = 'Starting session…'
+  else if (isLive) pillLabel = speaking ? displaySpeaker(lastSpeaker) : 'Listening'
+  else pillLabel = CONNECTION_LABELS[connection]
+
+  const isDegraded = connection === 'error' || connection === 'closed'
 
   return (
-    <header className="status-bar">
-      <div className="status-bar__brand">
-        <h1 className="status-bar__title">Live Fact-Checker</h1>
-        <p className="status-bar__subtitle">Real-time claim verification</p>
+    <header className="topbar">
+      <div className="topbar__brand">
+        <span className="topbar__mark" aria-hidden="true" />
+        <div>
+          <h1 className="topbar__title">
+            Live Fact-Checker
+            {isDemo && <span className="topbar__badge">Demo feed</span>}
+          </h1>
+          <p className="topbar__tagline">Claims checked as the debate happens</p>
+        </div>
       </div>
 
-      <dl className="status-bar__facts">
-        <div className="status-bar__fact">
-          <dt>Backend</dt>
-          <dd>{backendUrl}</dd>
-        </div>
-        <div className="status-bar__fact">
-          <dt>Session</dt>
-          <dd>{sessionId ?? '—'}</dd>
-        </div>
-        <div className="status-bar__fact">
-          <dt>Clients</dt>
-          <dd>{connectedClients ?? 0}</dd>
-        </div>
-        <div className="status-bar__fact">
-          <dt>Stream</dt>
-          <dd>
-            <span
-              className={`pill pill--${isLive ? 'live' : 'idle'}`}
-              aria-live="polite"
-            >
-              {CONNECTION_LABELS[connection]}
-            </span>
-          </dd>
-        </div>
-      </dl>
+      <div className="topbar__status">
+        <span
+          className={[
+            'livepill',
+            isLive ? 'livepill--on' : '',
+            speaking ? 'livepill--speaking' : '',
+            isDegraded ? 'livepill--degraded' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          title={CONNECTION_HINTS[connection]}
+        >
+          <span className="livepill__dot" aria-hidden="true" />
+          {pillLabel}
+        </span>
 
-      {phase === 'starting' && (
-        <span className="status-bar__phase">Starting session…</span>
-      )}
+        <dl className="topbar__facts">
+          <div className="topbar__fact">
+            <dt>Session</dt>
+            <dd title={sessionId ?? undefined}>{sessionId ?? '—'}</dd>
+          </div>
+          <div className="topbar__fact">
+            <dt>Judges</dt>
+            <dd title="WebSocket clients watching this session">
+              {connectedClients ?? 0}
+            </dd>
+          </div>
+          <div className="topbar__fact">
+            <dt>Backend</dt>
+            <dd title={backendUrl}>{backendUrl.replace(/^https?:\/\//, '')}</dd>
+          </div>
+        </dl>
+      </div>
     </header>
   )
 }

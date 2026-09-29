@@ -26,6 +26,9 @@ export class ApiError extends Error {
   }
 }
 
+// Re-export SessionState for consumers
+export type { SessionState }
+
 /** Unwrap `{"detail": {"code": ..., "message": ...}}` from an error body. */
 function toApiError(status: number, body: unknown): ApiError {
   const detail =
@@ -45,11 +48,36 @@ function toApiError(status: number, body: unknown): ApiError {
   return new ApiError(status, 'INTERNAL_ERROR', `Request failed with status ${status}.`)
 }
 
+/**
+ * A request that never reached the backend.
+ *
+ * `fetch` rejects with a bare `TypeError: Failed to fetch` when the host is
+ * down, the port is closed, or CORS blocks the response. None of that is
+ * actionable to someone watching a demo, and the raw string is an
+ * implementation detail, so it is translated into a sentence a judge can act
+ * on. This code is a frontend UI concept only; it is never sent to the backend
+ * and does not extend the backend's `ErrorCode` contract.
+ */
+function toUnreachableError(): ApiError {
+  return new ApiError(
+    0,
+    'BACKEND_UNAVAILABLE',
+    `Cannot reach the backend at ${BACKEND_URL}. Check that it is running, then try again.`,
+  )
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BACKEND_URL}${path}`, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-  })
+  let response: Response
+  try {
+    response = await fetch(`${BACKEND_URL}${path}`, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...init?.headers },
+    })
+  } catch (cause) {
+    // An aborted request is a user action, not a fault; let it stay silent.
+    if (cause instanceof DOMException && cause.name === 'AbortError') throw cause
+    throw toUnreachableError()
+  }
 
   if (!response.ok) {
     let body: unknown = null

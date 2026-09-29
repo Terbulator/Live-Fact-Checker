@@ -1,13 +1,17 @@
-# Verification module (existing)
+# Web framework and server. Without these the backend cannot start:
+# `backend.main` imports fastapi/uvicorn and `backend.config` uses
+# pydantic-settings to read the environment.
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
 pydantic>=2.0.0
-
-# Backend: HTTP API, WebSocket event layer, session management
-# `uvicorn[standard]` already supplies the `websockets` implementation.
-fastapi>=0.115.0
-uvicorn[standard]>=0.30.0
 pydantic-settings>=2.0.0
 
-# Voice: AssemblyAI realtime streaming (pyaudio needs system PortAudio headers)
+# WebSocket test client and async test support for the pytest suite.
+websockets>=12.0
+pytest>=7.0.0
+pytest-asyncio>=0.23.0
+
+# Voice pipeline (desktop capture -> AssemblyAI -> backend).
 assemblyai>=1.6.0
 python-dotenv>=1.0.0
 pyaudio>=0.2.11

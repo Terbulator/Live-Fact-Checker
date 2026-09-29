@@ -12,7 +12,7 @@ request handler.
 """
 
 import asyncio
-from typing import Dict, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 from starlette.websockets import WebSocket, WebSocketState
 
@@ -123,7 +123,6 @@ class WebSocketManager:
         )
         return delivered
 
-<<<<<<< HEAD
     async def broadcast(
         self, session_id: str, events: Iterable[Any]
     ) -> int:
@@ -133,8 +132,6 @@ class WebSocketManager:
             total += await self.send_to_session(session_id, event)
         return total
 
-=======
->>>>>>> 519a7346a1c04ed3296a5d645ae2767b55449c39
     # -- introspection ----------------------------------------------------
     def connection_count(self, session_id: Optional[str] = None) -> int:
         """Number of live clients, for one session or across all sessions."""

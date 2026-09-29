@@ -90,9 +90,15 @@ async def start_session(
         else:
             # The session owns this task: `POST /session/stop` cancels and awaits
             # it, so nothing keeps streaming (or 409-ing) after a stop.
+            # The websocket manager is passed so the stream waits for the
+            # browser to attach; otherwise the first events would be emitted
+            # into a session with no listener and lost.
             task = asyncio.create_task(
                 stream_mock_transcripts(
-                    router_instance, session_manager, session.sessionId
+                    router_instance,
+                    session_manager,
+                    session.sessionId,
+                    websocket_manager=websocket_manager,
                 )
             )
             session_manager.track_background_task(session.sessionId, task)

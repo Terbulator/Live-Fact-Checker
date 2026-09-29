@@ -36,6 +36,15 @@ export interface ClaimCard {
   /** True between the `claim` event and its `verification`. */
   pending: boolean
   verification: VerificationEvent | null
+  /**
+   * Key of the transcript line this claim came from.
+   *
+   * Captured at claim time rather than matched later, so the link stays correct
+   * even when a speaker repeats an identical sentence. Null when the claim
+   * arrived without a transcript line, which happens for claims produced by
+   * another producer or a verification-only event.
+   */
+  transcriptKey: string | null
 }
 
 /** Everything the live view renders, reduced from the event stream. */
@@ -44,6 +53,13 @@ export interface LiveView {
   claims: ClaimCard[]
   errors: ErrorEvent[]
   status: SessionEventStatus | SessionStatus | 'idle'
+  /**
+   * Wall-clock milliseconds of the most recent transcript event, or null if
+   * none has arrived. Drives the "speaker is talking" indicator.
+   */
+  lastSpeechAt: number | null
+  /** The speaker of the most recent transcript event. */
+  lastSpeaker: string | null
 }
 
 /** The initial, empty view. */
@@ -52,4 +68,6 @@ export const initialLiveView: LiveView = {
   claims: [],
   errors: [],
   status: 'idle',
+  lastSpeechAt: null,
+  lastSpeaker: null,
 }

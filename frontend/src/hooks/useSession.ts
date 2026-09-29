@@ -10,9 +10,9 @@
  * only *starts*, *watches* and *stops*.
  */
 
-import { useCallback, useMemo, useReducer, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 
-import { ApiError, startSession, stopSession } from '../lib/api'
+import { ApiError, getSession, startSession, stopSession } from '../lib/api'
 import { resolveWsUrl } from '../lib/config'
 import { liveViewReducer } from '../lib/reducer'
 import { initialLiveView, type LiveView } from '../types/model'
@@ -73,6 +73,10 @@ export function useSession(): UseSessionResult {
     async (options?: { demo?: boolean }) => {
       setPhase('starting')
       setFault(null)
+      // Clear the previous session's transcript, claims and verdicts before the
+      // new stream arrives, so repeated demos never show merged results.
+      // Results stay visible while idle, and are replaced on the next start.
+      dispatch({ type: 'reset' })
       try {
         const created = await startSession(options?.demo ?? false)
         setSession(created)
@@ -100,6 +104,41 @@ export function useSession(): UseSessionResult {
   }, [session])
 
   const dismissFault = useCallback(() => setFault(null), [])
+
+  /**
+   * Refresh the session snapshot once the socket is open.
+   *
+   * `POST /session/start` reports `connectedClients` as 0, because at that
+   * moment this browser has not attached yet. The backend counts connections
+   * live on `GET /session/{id}`, so one refresh on connect makes the count
+   * accurate. This is a single request per connection, not a poll: the backend
+   * pushes no session-state updates and the event contract is unchanged.
+   */
+  useEffect(() => {
+    if (connection !== 'open' || session === null) return
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const fresh = await getSession(session.sessionId)
+        if (!cancelled) setSession(fresh)
+      } catch (error) {
+        // The stream is already working; a failed count refresh must not
+        // disturb it or raise a fault the user cannot act on.
+        if (error instanceof ApiError) {
+          // Session gone server-side: stop reporting it as active.
+          if (error.code === 'SESSION_NOT_FOUND') {
+            setSession(null)
+            setPhase('idle')
+          }
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [connection, session?.sessionId])
 
   const clearErrors = useCallback(() => {
     dispatch({ type: 'clearErrors' })
