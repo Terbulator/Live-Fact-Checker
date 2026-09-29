@@ -32,7 +32,7 @@ async def test_claim_to_verification_true_verdict():
     claims = await claim_engine.extract_claims(transcript)
     assert len(claims) == 1
     claim = claims[0]
-    assert claim.claimId == "claim_001"
+    assert claim.claimId == "sess_test_101_claim_001"
     assert "India won the 2011 Cricket World Cup" in claim.claim
 
     verif_engine = VerificationServiceEngine()
@@ -136,3 +136,73 @@ async def test_event_router_end_to_end():
     assert len(verifications) == 1
     assert verifications[0].verdict == Verdict.TRUE
     assert verifications[0].claimId == claims[0].claimId
+
+
+@pytest.mark.asyncio
+async def test_claim_deduplication_session_isolation():
+    """Same claim in different sessions must both be processed; duplicate in same session filtered."""
+    claim_engine = LLMClaimEngine()
+
+    # Session A: first occurrence
+    transcript_a = TranscriptEvent(
+        type="transcript",
+        sessionId="session_A",
+        speaker="Speaker 1",
+        text="India won the 2011 Cricket World Cup.",
+        timestamp=10.0,
+        isFinal=True,
+    )
+    claims_a = await claim_engine.extract_claims(transcript_a)
+    assert len(claims_a) == 1
+    assert claims_a[0].claimId == "session_A_claim_001"
+
+    # Session B: same claim text, different session -> should NOT be filtered
+    transcript_b = TranscriptEvent(
+        type="transcript",
+        sessionId="session_B",
+        speaker="Speaker 1",
+        text="India won the 2011 Cricket World Cup.",
+        timestamp=10.0,
+        isFinal=True,
+    )
+    claims_b = await claim_engine.extract_claims(transcript_b)
+    assert len(claims_b) == 1
+    assert claims_b[0].claimId == "session_B_claim_001"
+
+    # Session A again: duplicate -> should be filtered
+    claims_a_dup = await claim_engine.extract_claims(transcript_a)
+    assert len(claims_a_dup) == 0
+
+    # Session B again: duplicate -> should be filtered
+    claims_b_dup = await claim_engine.extract_claims(transcript_b)
+    assert len(claims_b_dup) == 0
+
+
+@pytest.mark.asyncio
+async def test_claim_id_unique_across_sessions():
+    """Claim IDs must include session prefix to prevent collisions."""
+    claim_engine = LLMClaimEngine()
+
+    transcript_a = TranscriptEvent(
+        type="transcript",
+        sessionId="session_A",
+        speaker="Speaker 1",
+        text="India won the 2011 Cricket World Cup.",
+        timestamp=10.0,
+        isFinal=True,
+    )
+    transcript_b = TranscriptEvent(
+        type="transcript",
+        sessionId="session_B",
+        speaker="Speaker 1",
+        text="India won the 2011 Cricket World Cup.",
+        timestamp=10.0,
+        isFinal=True,
+    )
+
+    claims_a = await claim_engine.extract_claims(transcript_a)
+    claims_b = await claim_engine.extract_claims(transcript_b)
+
+    assert claims_a[0].claimId != claims_b[0].claimId
+    assert claims_a[0].claimId.startswith("session_A_claim_")
+    assert claims_b[0].claimId.startswith("session_B_claim_")

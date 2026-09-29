@@ -1,0 +1,23 @@
+# Ignore backend and other non-frontend directories
+backend/
+verification/
+voice/
+tests/
+.kilo/
+.pytest_cache/
+.venv/
+.env
+.env.*
+.pyc
+__pycache__/
+*.py
+requirements.txt
+pyproject.toml
+pytest.ini
+README.md
+.gitignore
+test_demo.json
+test_transcript.json
+
+# Only deploy frontend
+!frontend/
