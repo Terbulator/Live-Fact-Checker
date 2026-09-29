@@ -76,6 +76,14 @@ class Settings(BaseSettings):
     # --- Credentials (server-side only, never exposed to the browser) -----
     assemblyai_api_key: Optional[SecretStr] = Field(default=None)
     llm_gateway_api_key: Optional[SecretStr] = Field(default=None)
+    llm_gateway_base_url: str = Field(
+        default="https://api.assemblyai.com/llm/v1",
+        description="Base URL for the LLM Gateway API (OpenAI-compatible).",
+    )
+    llm_gateway_model: str = Field(
+        default="qwen3.5-4b-32k-fast",
+        description="Model name to use for the LLM Gateway.",
+    )
     search_api_key: Optional[SecretStr] = Field(default=None)
 
     @field_validator("cors_origins", mode="before")
