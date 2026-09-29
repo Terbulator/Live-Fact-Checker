@@ -6,7 +6,7 @@ import { AssemblyAIClient, postTranscriptToBackend } from './assemblyai';
 import { vi } from 'vitest';
 
 // Store sent messages globally for testing
-const sentMessages: string[] = [];
+const sentMessages: Array<{ data: string | ArrayBuffer; isBinary: boolean }> = [];
 
 // Mock WebSocket globally
 class MockWebSocket {
@@ -16,12 +16,15 @@ class MockWebSocket {
   static CLOSED = 3;
 
   readyState = MockWebSocket.CONNECTING;
+  url = '';
+  binaryType = 'arraybuffer';
   onopen: (() => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
   onclose: ((event: CloseEvent) => void) | null = null;
 
-  constructor(public url: string) {
+  constructor(public urlString: string) {
+    this.url = urlString;
     sentMessages.length = 0;
     // Simulate async connection
     setTimeout(() => {
@@ -30,8 +33,14 @@ class MockWebSocket {
     }, 0);
   }
 
-  send(data: string) {
-    sentMessages.push(data);
+  send(data: string | ArrayBuffer | Blob | ArrayBufferView) {
+    if (typeof data === 'string') {
+      sentMessages.push({ data, isBinary: false });
+    } else if (data instanceof ArrayBuffer) {
+      sentMessages.push({ data, isBinary: true });
+    } else if (ArrayBuffer.isView(data)) {
+      sentMessages.push({ data: data.buffer, isBinary: true });
+    }
   }
 
   close(code?: number, reason?: string) {
@@ -80,30 +89,26 @@ describe('AssemblyAIClient (v3)', () => {
     expect(client.connected).toBe(true);
   });
 
-  it('connects to correct v3 streaming endpoint', async () => {
+  it('connects to correct v3 streaming endpoint with required query params', async () => {
     await client.connect();
     await new Promise(r => setTimeout(r, 10));
     
     const ws = (client as any).ws;
     expect(ws.url).toContain('wss://streaming.assemblyai.com/v3/ws');
     expect(ws.url).toContain('token=test-token');
+    expect(ws.url).toContain('sample_rate=16000');
+    expect(ws.url).toContain('speech_model=universal-3-5-pro');
   });
 
-  it('sends configuration on connect with v3 format', async () => {
+  it('does NOT send Configure message on connect', async () => {
     await client.connect();
     await new Promise(r => setTimeout(r, 10));
     
-    // Find the config message
+    // Find any Configure message
     const configMsg = sentMessages.find(m => 
-      JSON.parse(m).type === 'Configure'
+      !m.isBinary && JSON.parse(m.data as string).type === 'Configure'
     );
-    expect(configMsg).toBeDefined();
-    
-    const parsed = JSON.parse(configMsg!);
-    expect(parsed.type).toBe('Configure');
-    expect(parsed.sample_rate).toBe(16000);
-    expect(parsed.speaker_labels).toBe(true);
-    expect(parsed.encoding).toBe('pcm_s16le');
+    expect(configMsg).toBeUndefined();
   });
 
   it('handles Turn message (partial transcript) with v3 format', async () => {
@@ -270,6 +275,42 @@ describe('AssemblyAIClient (v3)', () => {
 
     // Should only be called once due to deduplication
     expect(onTranscript).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends audio as binary PCM16 ArrayBuffer', async () => {
+    await client.connect();
+    await new Promise(r => setTimeout(r, 10));
+
+    // Send some audio
+    const audioChunk = new Float32Array([0.1, 0.2, -0.1, -0.2, 0.5, -0.5]);
+    client.streamAudio(audioChunk);
+
+    // Find binary message sent
+    const binaryMsg = sentMessages.find(m => m.isBinary);
+    expect(binaryMsg).toBeDefined();
+    expect(binaryMsg!.data).toBeInstanceOf(ArrayBuffer);
+    
+    // Verify it's PCM16 (Int16Array)
+    const buffer = binaryMsg!.data as ArrayBuffer;
+    const int16 = new Int16Array(buffer);
+    expect(int16.length).toBe(audioChunk.length);
+    // Check conversion: 0.1 * 0x7fff ≈ 3276, -0.1 * 0x8000 ≈ -3277
+    expect(int16[0]).toBeCloseTo(3276, -2);
+    expect(int16[2]).toBeCloseTo(-3277, -2);
+  });
+
+  it('sends Terminate message on disconnect', async () => {
+    await client.connect();
+    await new Promise(r => setTimeout(r, 10));
+
+    client.disconnect();
+
+    // Find Terminate message (sent as JSON string before close)
+    const terminateMsg = sentMessages.find(m => 
+      !m.isBinary && JSON.parse(m.data as string).type === 'Terminate'
+    );
+    expect(terminateMsg).toBeDefined();
+    expect(JSON.parse(terminateMsg!.data as string)).toEqual({ type: 'Terminate' });
   });
 
   it('disconnects cleanly', async () => {

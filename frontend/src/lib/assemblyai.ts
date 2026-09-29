@@ -69,21 +69,18 @@ interface ErrorMessage extends AssemblyAIMessage {
 
 type IncomingMessage = BeginMessage | TurnMessage | TerminationMessage | ErrorMessage;
 
-interface OutgoingAudioMessage {
-  audio_data: string; // base64 encoded PCM16 audio
-}
-
-interface OutgoingConfigMessage {
-  type: 'Configure';
-  sample_rate: number;
-  speaker_labels: boolean;
-  encoding: 'pcm_s16le';
+interface TerminateMessage {
+  type: 'Terminate';
 }
 
 /**
  * AssemblyAI Streaming Client (v3)
  *
  * Handles WebSocket connection, audio streaming, and transcript processing.
+ * v3 protocol: https://www.assemblyai.com/docs/api-reference/streaming
+ * - Connection parameters sent as query params in WebSocket URL
+ * - Audio sent as binary PCM16 frames
+ * - Terminate message sent to flush final transcription
  */
 export class AssemblyAIClient {
   private ws: WebSocket | null = null;
@@ -108,30 +105,34 @@ export class AssemblyAIClient {
 
   /** Connect to AssemblyAI v3 streaming WebSocket */
   async connect(): Promise<void> {
-    // v3 streaming endpoint with token as query parameter
-    const wsUrl = `wss://streaming.assemblyai.com/v3/ws?token=${encodeURIComponent(this.options.token)}`;
+    // v3 streaming endpoint with token and config as query parameters
+    // https://www.assemblyai.com/docs/api-reference/streaming
+    const params = new URLSearchParams({
+      token: this.options.token,
+      sample_rate: String(this.options.sampleRate ?? 16000),
+      speech_model: 'universal-3-5-pro',
+    });
+    const wsUrl = `wss://streaming.assemblyai.com/v3/ws?${params.toString()}`;
     this.ws = new WebSocket(wsUrl);
+
+    this.ws.binaryType = 'arraybuffer';
 
     this.ws.onopen = () => {
       console.log('[AssemblyAI] Connected to v3 streaming');
       this.isConnected = true;
       this.reconnectAttempts = 0;
-
-      // Send configuration
-      const sampleRate = this.options.sampleRate ?? 16000;
-      const config: OutgoingConfigMessage = {
-        type: 'Configure',
-        sample_rate: sampleRate,
-        speaker_labels: true,
-        encoding: 'pcm_s16le',
-      };
-      this.send(config);
+      // v3 does NOT accept a Configure message - config is in URL query params
     };
 
     this.ws.onmessage = (event) => {
       try {
-        const message = JSON.parse(event.data) as IncomingMessage;
-        this.handleMessage(message);
+        if (typeof event.data === 'string') {
+          const message = JSON.parse(event.data) as IncomingMessage;
+          this.handleMessage(message);
+        } else {
+          // Binary data not expected from AssemblyAI v3 (transcripts are JSON)
+          console.warn('[AssemblyAI] Received unexpected binary data');
+        }
       } catch (err) {
         console.error('[AssemblyAI] Failed to parse message:', err);
       }
@@ -160,23 +161,24 @@ export class AssemblyAIClient {
   /** Disconnect from AssemblyAI */
   disconnect(): void {
     this.stopMicrophone();
-    if (this.ws) {
-      this.ws.close(1000, 'Client disconnect');
-      this.ws = null;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      // Send Terminate message to flush final transcription before closing
+      const terminateMsg: TerminateMessage = { type: 'Terminate' };
+      this.ws.send(JSON.stringify(terminateMsg));
+      // Give a brief moment for the terminate to be processed
+      setTimeout(() => {
+        if (this.ws) {
+          this.ws.close(1000, 'Client disconnect');
+          this.ws = null;
+        }
+      }, 100);
     }
     this.isConnected = false;
   }
 
-  /** Send a message to AssemblyAI */
-  private send(message: OutgoingAudioMessage | OutgoingConfigMessage): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message));
-    }
-  }
-
-  /** Stream audio chunk to AssemblyAI */
+  /** Stream audio chunk to AssemblyAI as binary PCM16 */
   streamAudio(audioChunk: Float32Array): void {
-    if (!this.isConnected || !this.ws) return;
+    if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
     // Convert Float32Array to Int16Array (PCM16)
     const pcm16 = new Int16Array(audioChunk.length);
@@ -187,9 +189,8 @@ export class AssemblyAIClient {
       pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
     }
 
-    // Convert to base64
-    const base64 = this.arrayBufferToBase64(pcm16.buffer);
-    this.send({ audio_data: base64 });
+    // Send binary PCM16 data directly (not base64, not JSON)
+    this.ws.send(pcm16.buffer);
   }
 
   /** Start microphone capture */
@@ -322,18 +323,6 @@ export class AssemblyAIClient {
 
     console.log(`[${speaker}] ${isFinal ? 'FINAL' : 'PARTIAL'} ${message.transcript}`);
     this.options.onTranscript(event);
-  }
-
-  /** Convert ArrayBuffer to base64 string */
-  private arrayBufferToBase64(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-      const byte = bytes[i];
-      if (byte === undefined) continue;
-      binary += String.fromCharCode(byte);
-    }
-    return btoa(binary);
   }
 
   /** Check if currently connected */
