@@ -12,7 +12,7 @@ request handler.
 """
 
 import asyncio
-from typing import Dict, Optional, Set
+from typing import Any, Dict, Iterable, Optional, Set
 
 from starlette.websockets import WebSocket, WebSocketState
 
