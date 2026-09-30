@@ -84,9 +84,17 @@ class LLMClaimEngine(ClaimEngine):
 
     name = "llm-claim-engine"
 
-    def __init__(self, settings=None) -> None:
-        self.seen_claims: set = set()
-        self.claim_counter: int = 1
+    def __init__(self, settings=None, strict: bool = False) -> None:
+        # Session-scoped state. Both are keyed by session id: two concurrent
+        # sessions must never share deduplication state or a claim counter, or
+        # one session's claim would suppress another's and ids would collide.
+        self.seen_claims: Dict[str, set] = {}
+        self.claim_counter: Dict[str, int] = {}
+        # In strict mode the engine refuses to answer from the offline
+        # rule-based extractor and reports a clear error instead. The router
+        # turns that into a structured CLAIM_EXTRACTION_FAILED event. Set by
+        # the production wiring; left off for offline tests and demos.
+        self.strict = strict
         self._settings = settings or get_settings()
 
         # Build the API key from settings (SecretStr -> str)
@@ -101,12 +109,30 @@ class LLMClaimEngine(ClaimEngine):
         """Check if the engine has a valid API key configured."""
         return bool(self.api_key and self.api_key != "your_key_here")
 
+    def configuration_error(self) -> Optional[str]:
+        """Return why the LLM Gateway is unusable, or ``None`` when it is usable.
+
+        The message names the missing variable but never its value, so it is
+        safe to log and to place in an ``ErrorEvent.detail``.
+        """
+        if not self.is_configured():
+            return (
+                "LLM_GATEWAY_API_KEY is not configured, so LLMClaimEngine cannot "
+                f"call {self.base_url}/chat/completions. Set it server-side, or "
+                "set USE_MOCK_ENGINES=true to use the offline mock pipeline."
+            )
+        if not self.base_url or not self.model:
+            return "LLM_GATEWAY_BASE_URL and LLM_GATEWAY_MODEL must both be set."
+        return None
+
     def _get_session_claims(self, session_id: str) -> set:
+        """Return this session's dedup set, creating it on first use."""
         if session_id not in self.seen_claims:
             self.seen_claims[session_id] = set()
         return self.seen_claims[session_id]
 
     def _get_session_counter(self, session_id: str) -> int:
+        """Return the next claim number for this session, starting at 1."""
         if session_id not in self.claim_counter:
             self.claim_counter[session_id] = 1
         return self.claim_counter[session_id]
@@ -115,6 +141,7 @@ class LLMClaimEngine(ClaimEngine):
         self.claim_counter[session_id] = self._get_session_counter(session_id) + 1
 
     def _generate_claim_id(self, session_id: str) -> str:
+        """Return the deterministic, session-scoped id for the next claim."""
         counter = self._get_session_counter(session_id)
         self._increment_session_counter(session_id)
         return f"{session_id}_claim_{counter:03d}"
@@ -146,14 +173,27 @@ class LLMClaimEngine(ClaimEngine):
         if not text:
             return []
 
+        if self.strict:
+            problem = self.configuration_error()
+            if problem:
+                raise ClaimEngineError(problem)
+
         raw_claims = []
 
         if self.is_configured():
             try:
                 raw_claims = await self._call_llm_gateway(text)
-            except Exception as e:
+            except Exception as exc:  # noqa: BLE001 - gateway shape is untrusted
+                if self.strict:
+                    # Falling back here would silently broadcast a fabricated
+                    # rule-based claim as if the model had extracted it.
+                    raise ClaimEngineError(
+                        f"LLM Gateway call to {self.base_url}/chat/completions "
+                        f"failed: {type(exc).__name__}: {exc}"
+                    ) from exc
                 logger.warning(
-                    f"LLM Gateway call failed: {e}. Falling back to rule-based extraction."
+                    "LLM Gateway call failed (%s). Falling back to rule-based extraction.",
+                    type(exc).__name__,
                 )
                 raw_claims = self._get_fallback_claims(text)
         else:
@@ -214,9 +254,19 @@ class LLMClaimEngine(ClaimEngine):
         response.raise_for_status()
         data = response.json()
 
-        content = data["choices"][0]["message"]["content"].strip()
+        # The gateway payload is untrusted: a missing choice, a null content or
+        # non-JSON text must degrade to "no claims", never raise through here.
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            logger.warning("LLM Gateway response had no message content: %s", exc)
+            return []
+        if not isinstance(content, str):
+            logger.warning("LLM Gateway message content was not a string.")
+            return []
 
         # Strip markdown code fences if present
+        content = content.strip()
         if content.startswith("```json"):
             content = content[7:]
         if content.startswith("```"):
@@ -224,8 +274,13 @@ class LLMClaimEngine(ClaimEngine):
         if content.endswith("```"):
             content = content[:-3]
 
-        parsed = json.loads(content.strip())
-        return parsed.get("claims", [])
+        try:
+            parsed = json.loads(content.strip())
+        except (TypeError, ValueError) as exc:
+            logger.warning("LLM Gateway returned unparsable JSON: %s", exc)
+            return []
+
+        return self._validate_llm_response(parsed)
 
     def _build_prompt(self, text: str) -> str:
         return f"""

@@ -226,9 +226,11 @@ Two additional bridges are provided:
   Because that module's models do not declare `sessionId` and are strict
   (`extra="forbid"`), the bridge sends **only** the fields it accepts and
   re-attaches `sessionId` afterwards. `verification/models.py` is never edited.
-* `UnavailableClaimEngine` / `UnavailableVerificationEngine` — selected when
-  `USE_MOCK_ENGINES=false` before the real modules are integrated. They fail
-  cleanly so a structured `error` event is emitted instead of a silent drop.
+* `UnavailableClaimEngine` / `UnavailableVerificationEngine` — placeholders
+  retained for tests and demos. They are no longer selected by
+  `USE_MOCK_ENGINES`: that flag now resolves to `LLMClaimEngine`, which fails
+  cleanly on a missing gateway credential so a structured `error` event is
+  emitted instead of a silent drop.
 
 Verdict translation between the wire format and the internal module is
 explicit and lives only in `backend/adapters/verification.py`:
@@ -313,7 +315,7 @@ backend/
 │   ├── session.py
 │   └── events.py
 ├── adapters/
-│   ├── claim_engine.py       # ClaimEngine interface + mock + unavailable
+│   ├── claim_engine.py       # ClaimEngine interface + LLM, mock, unavailable
 │   └── verification.py       # VerificationEngine + verdict translation
 └── mocks/
     └── mock_stream.py        # MockClaimEngine, MockVerificationEngine, script

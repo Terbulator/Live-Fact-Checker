@@ -383,8 +383,8 @@ def test_real_verification_engine_is_wired_without_code_changes() -> None:
     """`use_mock_engines=false` reaches the existing verification package."""
     app = create_app(settings=REAL_SETTINGS)
     assert app.state.verification_engine.name == "verification-service"
-    # Atif's claim module is not integrated yet, so claims stay unavailable.
-    assert app.state.claim_engine.name == "unavailable-claim-engine"
+    # Atif's claim module is integrated, so real mode reaches the LLM Gateway.
+    assert app.state.claim_engine.name == "llm-claim-engine"
 
     with TestClient(app) as client:
         assert client.get("/health").json()["engines"]["verificationEngine"] == (

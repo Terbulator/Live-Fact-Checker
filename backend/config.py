@@ -66,10 +66,10 @@ class Settings(BaseSettings):
         default=True,
         description=(
             "True selects the deterministic offline mock engines. False selects "
-            "the real modules: claim extraction stays unavailable until Atif's "
-            "module is integrated, while verification runs through the existing "
-            "`verification` package. This single switch is all that is needed to "
-            "move between mock and real mode."
+            "the real modules: claim extraction runs through LLMClaimEngine "
+            "against the OpenAI-compatible LLM Gateway, while verification runs "
+            "through the existing `verification` package. This single switch is "
+            "all that is needed to move between mock and real mode."
         ),
     )
 

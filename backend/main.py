@@ -17,7 +17,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.adapters.claim_engine import ClaimEngine, UnavailableClaimEngine
+from backend.adapters.claim_engine import ClaimEngine, LLMClaimEngine
 from backend.adapters.verification import (
     UnavailableVerificationEngine,
     VerificationEngine,
@@ -55,7 +55,25 @@ Pipeline served by this service:
 
 
 def _default_claim_engine(settings: Settings) -> ClaimEngine:
-    return MockClaimEngine() if settings.use_mock_engines else UnavailableClaimEngine()
+    """Pick the claim engine from the single ``use_mock_engines`` switch.
+
+    * mock mode -> :class:`MockClaimEngine`, fully offline
+    * real mode  -> :class:`LLMClaimEngine` against the configured
+      OpenAI-compatible LLM Gateway
+
+    The real path is deliberately never downgraded to
+    :class:`UnavailableClaimEngine`: a missing credential or an unreachable
+    gateway must surface as a structured ``CLAIM_EXTRACTION_FAILED`` event
+    rather than as a pipeline that quietly emits no claims and looks healthy.
+
+    ``strict=True`` makes the engine fail loudly instead of silently falling
+    back to the offline rule-based extractor, which would otherwise broadcast
+    fabricated claims as if the model had produced them. The app still starts,
+    so ``GET /health`` stays reachable for diagnosis.
+    """
+    if settings.use_mock_engines:
+        return MockClaimEngine()
+    return LLMClaimEngine(settings, strict=True)
 
 
 def _default_verification_engine(settings: Settings) -> VerificationEngine:
