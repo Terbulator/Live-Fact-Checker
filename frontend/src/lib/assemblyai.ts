@@ -121,8 +121,14 @@ export class AssemblyAIClient {
       }
     }
 
-    // v3 streaming endpoint with token as query parameter
-    const wsUrl = `wss://streaming.assemblyai.com/v3/ws?token=${encodeURIComponent(token)}`;
+    // v3 streaming endpoint. Config is passed as query params; sample_rate is
+    // required for raw PCM16 audio, and must match the rate the microphone is
+    // captured at (see startMicrophone).
+    const sampleRate = this.options.sampleRate ?? 16000;
+    const wsUrl =
+      `wss://streaming.assemblyai.com/v3/ws?token=${encodeURIComponent(token)}` +
+      `&sample_rate=${sampleRate}` +
+      `&speech_model=universal-3-5-pro`;
     this.ws = new WebSocket(wsUrl);
 
     this.ws.binaryType = 'arraybuffer';
@@ -341,27 +347,54 @@ export class AssemblyAIClient {
   }
 }
 
+/** Result of posting one transcript to the backend. */
+export interface TranscriptPostResult {
+  ok: boolean;
+  status: number;
+  /**
+   * The backend no longer knows this session id. Set on 404 / SESSION_NOT_FOUND,
+   * which happens after a backend restart destroys its in-memory session
+   * registry. The caller must stop posting and start a fresh session rather
+   * than retrying with the dead id.
+   */
+  staleSession: boolean;
+}
+
 /**
  * Post a transcript event to the backend
  */
-export async function postTranscriptToBackend(event: AssemblyAITranscriptEvent): Promise<boolean> {
-  const response = await fetch(`${BACKEND_URL}/events/transcript`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      type: 'transcript',
-      sessionId: event.sessionId,
-      speaker: event.speaker,
-      text: event.text,
-      timestamp: event.timestamp,
-      isFinal: event.isFinal,
-    }),
-  });
+export async function postTranscriptToBackend(event: AssemblyAITranscriptEvent): Promise<TranscriptPostResult> {
+  let response: Response;
+  try {
+    response = await fetch(`${BACKEND_URL}/events/transcript`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'transcript',
+        sessionId: event.sessionId,
+        speaker: event.speaker,
+        text: event.text,
+        timestamp: event.timestamp,
+        isFinal: event.isFinal,
+      }),
+    });
+  } catch (err) {
+    // A network failure is not evidence that the session is dead, so it is
+    // deliberately not reported as stale.
+    console.error('[Backend] Failed to post transcript:', err);
+    return { ok: false, status: 0, staleSession: false };
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     console.error('[Backend] Failed to post transcript:', error);
-    return false;
+    const code = (error as { code?: string })?.code;
+    return {
+      ok: false,
+      status: response.status,
+      staleSession: response.status === 404 || code === 'SESSION_NOT_FOUND',
+    };
   }
-  return true;
+
+  return { ok: true, status: response.status, staleSession: false };
 }

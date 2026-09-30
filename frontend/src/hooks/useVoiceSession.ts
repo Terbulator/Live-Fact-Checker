@@ -29,6 +29,11 @@ export interface UseVoiceSessionOptions {
   onError?: (error: Error) => void;
   /** External sessionId to use (from useSession). If not provided, creates its own session. */
   externalSessionId?: string | null;
+  /**
+   * Called with the new id after a backend restart invalidated the old
+   * session, so the UI can re-point any WebSocket subscription at it.
+   */
+  onSessionRecreated?: (sessionId: string) => void;
 }
 
 export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
@@ -44,6 +49,13 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
   const sessionIdRef = useRef<string | null>(null);
   const isShuttingDownRef = useRef(false);
   const ownsSessionRef = useRef(false);
+  // Guards against concurrent recovery: a burst of 404s from queued transcripts
+  // must produce exactly one rebuild, not one per transcript.
+  const isRecoveringRef = useRef(false);
+  // Lets each callback reach the other without the two `const` bindings having
+  // to be mutually referential, which would be a temporal dead zone error.
+  const handleTranscriptRef = useRef<((e: AssemblyAITranscriptEvent) => Promise<void>) | undefined>(undefined);
+  const recoverFromStaleSessionRef = useRef<(() => Promise<void>) | undefined>(undefined);
 
   const updateStatus = useCallback((status: VoiceSessionStatus) => {
     setState((prev) => {
@@ -74,20 +86,110 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
     return data.token;
   }, []);
 
-  /** Handle transcript from AssemblyAI - post to backend and call callback */
+  /**
+   * Recover from a backend restart that destroyed this session.
+   *
+   * Ordered deliberately: stop posting, tear down the dead realtime connection,
+   * obtain a fresh session, then reconnect AssemblyAI so the next transcript
+   * carries the new id. A historical row in Supabase is not an active session,
+   * so the old id is discarded rather than recreated.
+   */
+  const recoverFromStaleSession = useCallback(async () => {
+    if (isRecoveringRef.current) return;
+    isRecoveringRef.current = true;
+
+    try {
+      // 1. Stop the dead realtime connection.
+      const client = clientRef.current;
+      if (client) {
+        client.disconnect();
+        clientRef.current = null;
+      }
+      setState((prev) => ({
+        ...prev,
+        isAssemblyAIConnected: false,
+        isMicrophoneActive: false,
+      }));
+
+      // 2. A fresh backend session.
+      const session = await startSession(false);
+      sessionIdRef.current = session.sessionId;
+      ownsSessionRef.current = true;
+      setState((prev) => ({ ...prev, session }));
+
+      // 3. Reconnect AssemblyAI against the new session id.
+      const token = await fetchAssemblyAIToken();
+      const reconnected = new AssemblyAIClient({
+        token,
+        sessionId: session.sessionId,
+        onTranscript: (event) => handleTranscriptRef.current?.(event),
+        onError: (err) => {
+          console.error('[VoiceSession] AssemblyAI error after recovery:', err);
+          setError(err.message);
+        },
+        onClose: () => {
+          setState((prev) => ({ ...prev, isAssemblyAIConnected: false }));
+        },
+        getToken: fetchAssemblyAIToken,
+      });
+
+      clientRef.current = reconnected;
+      await reconnected.connect();
+
+      let attempts = 0;
+      while (!reconnected.connected && attempts < 50) {
+        await new Promise((r) => setTimeout(r, 100));
+        attempts++;
+      }
+
+      if (!reconnected.connected) {
+        throw new Error('AssemblyAI connection timeout after session recovery');
+      }
+
+      setState((prev) => ({ ...prev, isAssemblyAIConnected: true }));
+      await reconnected.startMicrophone();
+      setState((prev) => ({ ...prev, isMicrophoneActive: true }));
+
+      console.log(`[VoiceSession] Recovered with new session: ${session.sessionId}`);
+      options.onSessionRecreated?.(session.sessionId);
+    } catch (err) {
+      console.error('[VoiceSession] Session recovery failed:', err);
+      setError(err instanceof Error ? err.message : 'Failed to recover session');
+      updateStatus('error');
+    } finally {
+      isRecoveringRef.current = false;
+    }
+  }, [fetchAssemblyAIToken, options, setError, updateStatus]);
+
+  // Handle transcript from AssemblyAI - post to backend and call the UI callback.
+  // Reads the recovery path through a ref rather than the binding directly, so
+  // the two callbacks do not have to be mutually referential.
   const handleTranscript = useCallback(
     async (event: AssemblyAITranscriptEvent) => {
-      // Post to backend
-      const success = await postTranscriptToBackend(event);
-      if (!success) {
+      const result = await postTranscriptToBackend(event);
+
+      if (result.staleSession) {
+        // The backend lost this session (restart, deploy, idle eviction). Posting
+        // again with the dead id would 404 forever, so stop, rebuild the
+        // session and reconnect instead of hammering a dead endpoint.
+        console.warn('[VoiceSession] Stale session detected; recovering.');
+        await recoverFromStaleSessionRef.current?.();
+        return;
+      }
+
+      if (!result.ok) {
         console.error('[VoiceSession] Failed to post transcript to backend');
       }
 
-      // Call UI callback
       options.onTranscript?.(event);
     },
-    [options]
+    [options],
   );
+
+  // Point the refs at the current callbacks. Both are assigned only after every
+  // binding they could read exists; reading earlier would be a TDZ error.
+  handleTranscriptRef.current = handleTranscript;
+  recoverFromStaleSessionRef.current = recoverFromStaleSession;
 
   /** Start the voice session: create backend session (if needed), get AssemblyAI token, connect mic */
   const start = useCallback(async () => {

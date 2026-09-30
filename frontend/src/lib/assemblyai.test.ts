@@ -339,7 +339,7 @@ describe('postTranscriptToBackend', () => {
       isFinal: true,
     });
 
-    expect(result).toBe(true);
+    expect(result.ok).toBe(true);
     expect(mockFetch).toHaveBeenCalledWith(
       'http://127.0.0.1:8000/events/transcript',
       expect.objectContaining({
@@ -357,7 +357,7 @@ describe('postTranscriptToBackend', () => {
     );
   });
 
-  it('returns false on backend error', async () => {
+  it('returns ok=false on backend error', async () => {
     mockFetch.mockResolvedValueOnce({ 
       ok: false, 
       json: () => Promise.resolve({ detail: 'error' }) 
@@ -371,6 +371,41 @@ describe('postTranscriptToBackend', () => {
       isFinal: true,
     });
 
-    expect(result).toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  it('flags a 404 session as stale so the caller stops retrying', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: () => Promise.resolve({ code: 'SESSION_NOT_FOUND' }),
+    });
+
+    const result = await postTranscriptToBackend({
+      sessionId: 'dead-session',
+      speaker: 'Speaker 1',
+      text: 'Hello world',
+      timestamp: 1.5,
+      isFinal: true,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.staleSession).toBe(true);
+  });
+
+  it('does not treat a network failure as a stale session', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('network down'));
+
+    const result = await postTranscriptToBackend({
+      sessionId: 'test-session',
+      speaker: 'Speaker 1',
+      text: 'Hello world',
+      timestamp: 1.5,
+      isFinal: true,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(0);
+    expect(result.staleSession).toBe(false);
   });
 });
