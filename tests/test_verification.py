@@ -19,7 +19,85 @@ from verification.models import ClaimEvent, EvidenceItem, VerdictType, Verificat
 from verification.query_generator import clean_conversational_text, generate_search_query
 from verification.retriever import MockRetriever
 from verification.service import VerificationService, verify_claim_event
-from verification.mock_data import MOCK_CLAIMS
+from tests.fixtures.mock_claims import MOCK_CLAIMS
+
+
+def _seeded_verification_service() -> VerificationService:
+    """Create a VerificationService with the standard test knowledge base."""
+    retriever = MockRetriever()
+    # Cricket World Cup 2011
+    retriever.register_evidence(
+        keywords=["cricket", "world cup", "2011", "india won", "india"],
+        items=[
+            EvidenceItem(
+                snippet="India won the 2011 ICC Cricket World Cup, defeating Sri Lanka in the final at Wankhede Stadium in Mumbai.",
+                source_url="https://www.espncricinfo.com/series/icc-cricket-world-cup-2010-11-381449/india-vs-sri-lanka-final-433606/match-report",
+                title="2011 ICC Cricket World Cup Final",
+                stance="supports",
+                confidence=0.99,
+            )
+        ],
+    )
+    # Apollo 11 Moon landing
+    retriever.register_evidence(
+        keywords=["apollo", "moon", "1969", "neil armstrong", "astronauts", "nasa"],
+        items=[
+            EvidenceItem(
+                snippet="NASA's Apollo 11 successfully landed humans on the Moon on July 20, 1969.",
+                source_url="https://www.nasa.gov/mission_pages/apollo/apollo-11.html",
+                title="NASA Apollo 11 Mission Overview",
+                stance="supports",
+                confidence=0.99,
+            )
+        ],
+    )
+    # Company units sold
+    retriever.register_evidence(
+        keywords=["company", "sold", "two million", "units", "million units"],
+        items=[
+            EvidenceItem(
+                snippet="Official regulatory filings confirm the company sold 1.2 million units in fiscal year 2023.",
+                source_url="https://sec.gov/edgar/filings/company-annual-2023.pdf",
+                title="SEC Annual Disclosure Report 2023",
+                stance="refutes",
+                confidence=0.98,
+            )
+        ],
+    )
+    # Mount Everest location
+    retriever.register_evidence(
+        keywords=["mount everest", "everest", "africa", "highest peak", "peak in africa"],
+        items=[
+            EvidenceItem(
+                snippet="Mount Everest is located in the Himalayas on the border of Nepal and China in Asia. Mount Kilimanjaro is the highest peak in Africa.",
+                source_url="https://britannica.com/place/Mount-Everest",
+                title="Encyclopaedia Britannica - Mount Everest",
+                stance="refutes",
+                confidence=0.99,
+            )
+        ],
+    )
+    # Product release date (conflicting)
+    retriever.register_evidence(
+        keywords=["product release", "november 15", "release date", "launch date"],
+        items=[
+            EvidenceItem(
+                snippet="Tech Insider reports internal memos scheduling the product release for November 15.",
+                source_url="https://techinsider.example.com/exclusive-launch-dates",
+                title="Tech Insider Report",
+                stance="conflicting",
+                confidence=0.70,
+            ),
+            EvidenceItem(
+                snippet="Supply chain analysts state production bottlenecks delayed the product launch to Q1 next year.",
+                source_url="https://supplychaindaily.example.com/delays-confirmed",
+                title="Supply Chain Daily",
+                stance="conflicting",
+                confidence=0.72,
+            ),
+        ],
+    )
+    return VerificationService(retriever=retriever)
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +200,7 @@ def test_query_generator_handles_empty_string():
 
 def test_claim_id_preservation():
     """Ensures the original claimId is strictly preserved across the pipeline."""
-    service = VerificationService()
+    service = _seeded_verification_service()
     test_id = "unique_claim_id_9999"
     claim = {
         "type": "claim",
@@ -139,9 +217,28 @@ def test_claim_id_preservation():
 # 4. Verdict Types Tests (True / False / Unverifiable)
 # ---------------------------------------------------------------------------
 
+def _service_with_evidence(claim_text: str, evidence: list) -> VerificationService:
+    """Helper to create a service with specific evidence for a claim."""
+    from verification.retriever import MockRetriever
+    retriever = MockRetriever()
+    retriever.register_evidence(keywords=[claim_text], items=evidence)
+    return VerificationService(retriever=retriever)
+
+
 def test_verdict_true():
     """Tests a clearly true factual claim."""
-    service = VerificationService()
+    evidence = [
+        EvidenceItem(
+            snippet="NASA's Apollo 11 successfully landed humans on the Moon on July 20, 1969.",
+            source_url="https://www.nasa.gov/mission_pages/apollo/apollo-11.html",
+            title="NASA Apollo 11 Mission Overview",
+            stance="supports",
+            confidence=0.99,
+        )
+    ]
+    service = _service_with_evidence(
+        "NASA's Apollo 11 landed humans on the Moon in July 1969.", evidence
+    )
     claim = {
         "type": "claim",
         "claimId": "claim_true_01",
@@ -157,7 +254,18 @@ def test_verdict_true():
 
 def test_verdict_false_geographical():
     """Tests a clearly false claim."""
-    service = VerificationService()
+    evidence = [
+        EvidenceItem(
+            snippet="Mount Everest is located in the Himalayas on the border of Nepal and China in Asia. Mount Kilimanjaro is the highest peak in Africa.",
+            source_url="https://britannica.com/place/Mount-Everest",
+            title="Encyclopaedia Britannica - Mount Everest",
+            stance="refutes",
+            confidence=0.99,
+        )
+    ]
+    service = _service_with_evidence(
+        "Mount Everest is the highest mountain peak in Africa.", evidence
+    )
     claim = {
         "type": "claim",
         "claimId": "claim_false_01",
@@ -173,7 +281,18 @@ def test_verdict_false_geographical():
 
 def test_verdict_false_numerical_contract_example():
     """Tests the exact sample claim from project specification."""
-    service = VerificationService()
+    evidence = [
+        EvidenceItem(
+            snippet="Official regulatory filings confirm the company sold 1.2 million units in fiscal year 2023.",
+            source_url="https://sec.gov/edgar/filings/company-annual-2023.pdf",
+            title="SEC Annual Disclosure Report 2023",
+            stance="refutes",
+            confidence=0.98,
+        )
+    ]
+    service = _service_with_evidence(
+        "The company sold two million units.", evidence
+    )
     claim = {
         "type": "claim",
         "claimId": "claim_001",
@@ -205,7 +324,25 @@ def test_verdict_unverifiable_no_evidence():
 
 def test_verdict_unverifiable_conflicting_evidence():
     """Tests conflicting evidence reports leading to Unverifiable verdict."""
-    service = VerificationService()
+    evidence = [
+        EvidenceItem(
+            snippet="Tech Insider reports internal memos scheduling the product release for November 15.",
+            source_url="https://techinsider.example.com/exclusive-launch-dates",
+            title="Tech Insider Report",
+            stance="conflicting",
+            confidence=0.70,
+        ),
+        EvidenceItem(
+            snippet="Supply chain analysts state production bottlenecks delayed the product launch to Q1 next year.",
+            source_url="https://supplychaindaily.example.com/delays-confirmed",
+            title="Supply Chain Daily",
+            stance="conflicting",
+            confidence=0.72,
+        ),
+    ]
+    service = _service_with_evidence(
+        "The new product release will occur exactly on November 15.", evidence
+    )
     claim = {
         "type": "claim",
         "claimId": "claim_conflict_01",
@@ -264,9 +401,87 @@ def test_checker_opposing_stances():
 # 6. Service Batch & Mock Dataset Tests
 # ---------------------------------------------------------------------------
 
+def _mock_retriever_with_all_claims() -> MockRetriever:
+    """Build a MockRetriever with evidence for all MOCK_CLAIMS."""
+    retriever = MockRetriever()
+    
+    # claim_001: The company sold two million units. -> FALSE
+    retriever.register_evidence(
+        keywords=["company sold two million units"],
+        items=[EvidenceItem(
+            snippet="Official regulatory filings confirm the company sold 1.2 million units in fiscal year 2023.",
+            source_url="https://sec.gov/edgar/filings/company-annual-2023.pdf",
+            title="SEC Annual Disclosure Report 2023",
+            stance="refutes",
+            confidence=0.98,
+        )]
+    )
+    
+    # claim_002: NASA's Apollo 11 landed humans on the Moon in July 1969. -> TRUE
+    retriever.register_evidence(
+        keywords=["NASA's Apollo 11 landed humans on the Moon in July 1969"],
+        items=[EvidenceItem(
+            snippet="NASA's Apollo 11 successfully landed humans on the Moon on July 20, 1969.",
+            source_url="https://www.nasa.gov/mission_pages/apollo/apollo-11.html",
+            title="NASA Apollo 11 Mission Overview",
+            stance="supports",
+            confidence=0.99,
+        )]
+    )
+    
+    # claim_003: Mount Everest is the highest mountain peak in Africa. -> FALSE
+    retriever.register_evidence(
+        keywords=["Mount Everest is the highest mountain peak in Africa"],
+        items=[EvidenceItem(
+            snippet="Mount Everest is located in the Himalayas on the border of Nepal and China in Asia. Mount Kilimanjaro is the highest peak in Africa.",
+            source_url="https://britannica.com/place/Mount-Everest",
+            title="Encyclopaedia Britannica - Mount Everest",
+            stance="refutes",
+            confidence=0.99,
+        )]
+    )
+    
+    # claim_004: CEO privately considers strawberry ice cream -> UNVERIFIABLE (no evidence)
+    # claim_005: Product release Nov 15 -> UNVERIFIABLE (conflicting)
+    retriever.register_evidence(
+        keywords=["product release will occur exactly on November 15"],
+        items=[
+            EvidenceItem(
+                snippet="Tech Insider reports internal memos scheduling the product release for November 15.",
+                source_url="https://techinsider.example.com/exclusive-launch-dates",
+                title="Tech Insider Report",
+                stance="conflicting",
+                confidence=0.70,
+            ),
+            EvidenceItem(
+                snippet="Supply chain analysts state production bottlenecks delayed the product launch to Q1 next year.",
+                source_url="https://supplychaindaily.example.com/delays-confirmed",
+                title="Supply Chain Daily",
+                stance="conflicting",
+                confidence=0.72,
+            ),
+        ]
+    )
+    
+    # claim_006: Inflation rate dropped 15% -> FALSE
+    retriever.register_evidence(
+        keywords=["national inflation rate dropped by 15%"],
+        items=[EvidenceItem(
+            snippet="The Bureau of Labor Statistics reported consumer inflation slowed by 0.5% year-over-year, not 15%.",
+            source_url="https://bls.gov/cpi/latest-numbers.htm",
+            title="Bureau of Labor Statistics Consumer Price Index",
+            stance="refutes",
+            confidence=0.95,
+        )]
+    )
+    
+    return retriever
+
+
 def test_batch_verification():
     """Tests batch verification processing multiple claims."""
-    service = VerificationService()
+    retriever = _mock_retriever_with_all_claims()
+    service = VerificationService(retriever=retriever)
     results = service.verify_batch(MOCK_CLAIMS)
     assert len(results) == len(MOCK_CLAIMS)
     for original, verified in zip(MOCK_CLAIMS, results):
@@ -278,7 +493,8 @@ def test_batch_verification():
 
 def test_all_verdict_types_represented_in_mock_claims():
     """Ensures mock dataset exercises all three required verdict types."""
-    service = VerificationService()
+    retriever = _mock_retriever_with_all_claims()
+    service = VerificationService(retriever=retriever)
     results = service.verify_batch(MOCK_CLAIMS)
     verdicts = {r.verdict for r in results}
     assert VerdictType.TRUE in verdicts
@@ -309,7 +525,19 @@ def test_verification_event_to_dict():
 
 def test_service_verify_claim_dict_interface():
     """Ensures verify_claim_dict accepts a dict and returns an agreed dict."""
-    service = VerificationService()
+    evidence = [
+        EvidenceItem(
+            snippet="Official regulatory filings confirm the company sold 1.2 million units in fiscal year 2023.",
+            source_url="https://sec.gov/edgar/filings/company-annual-2023.pdf",
+            title="SEC Annual Disclosure Report 2023",
+            stance="refutes",
+            confidence=0.98,
+        )
+    ]
+    retriever = MockRetriever()
+    retriever.register_evidence(keywords=["The company sold two million units"], items=evidence)
+    service = VerificationService(retriever=retriever)
+    
     claim_dict = {
         "type": "claim",
         "claimId": "claim_atif_01",
@@ -328,7 +556,19 @@ def test_service_verify_claim_dict_interface():
 
 def test_service_handles_forwarded_extra_fields():
     """Ensures verify_claim gracefully filters extra pipeline metadata (e.g. sessionId)."""
-    service = VerificationService()
+    evidence = [
+        EvidenceItem(
+            snippet="Official regulatory filings confirm the company sold 1.2 million units in fiscal year 2023.",
+            source_url="https://sec.gov/edgar/filings/company-annual-2023.pdf",
+            title="SEC Annual Disclosure Report 2023",
+            stance="refutes",
+            confidence=0.98,
+        )
+    ]
+    retriever = MockRetriever()
+    retriever.register_evidence(keywords=["The company sold two million units"], items=evidence)
+    service = VerificationService(retriever=retriever)
+    
     forwarded = {
         "type": "claim",
         "claimId": "claim_forwarded_01",
@@ -345,6 +585,19 @@ def test_service_handles_forwarded_extra_fields():
 
 def test_service_accepts_model_dump_object():
     """Ensures objects from another module with a model_dump method are accepted."""
+    evidence = [
+        EvidenceItem(
+            snippet="NASA's Apollo 11 successfully landed humans on the Moon on July 20, 1969.",
+            source_url="https://www.nasa.gov/mission_pages/apollo/apollo-11.html",
+            title="NASA Apollo 11 Mission Overview",
+            stance="supports",
+            confidence=0.99,
+        )
+    ]
+    retriever = MockRetriever()
+    retriever.register_evidence(keywords=["NASA's Apollo 11 landed humans on the Moon in July 1969"], items=evidence)
+    service = VerificationService(retriever=retriever)
+    
     class FakeExternalClaim:
         def model_dump(self):
             return {
@@ -355,7 +608,6 @@ def test_service_accepts_model_dump_object():
                 "timestamp": 10.0,
             }
 
-    service = VerificationService()
     result = service.verify_claim(FakeExternalClaim())
     assert result.claimId == "claim_ext_01"
     assert result.verdict == VerdictType.TRUE

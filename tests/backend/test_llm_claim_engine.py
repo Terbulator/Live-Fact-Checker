@@ -31,6 +31,8 @@ from backend.router import EventRouter
 from backend.schemas import ClaimEvent, TranscriptEvent, Verdict
 from backend.session_manager import SessionManager
 from backend.websocket_manager import WebSocketManager
+from verification.models import EvidenceItem
+from verification.retriever import MockRetriever
 from tests.backend.conftest import transcript_payload
 
 GATEWAY_KEY = "test-llm-gateway-key"
@@ -58,6 +60,51 @@ def _transcript(session_id: str, text: str = "Some spoken words.", ts: float = 1
         timestamp=ts,
         isFinal=True,
     )
+
+
+def _seeded_mock_retriever() -> MockRetriever:
+    """Create a MockRetriever with the standard test knowledge base."""
+    retriever = MockRetriever()
+    # Cricket World Cup 2011
+    retriever.register_evidence(
+        keywords=["cricket", "world cup", "2011", "india won", "india"],
+        items=[
+            EvidenceItem(
+                snippet="India won the 2011 ICC Cricket World Cup, defeating Sri Lanka in the final at Wankhede Stadium in Mumbai.",
+                source_url="https://www.espncricinfo.com/series/icc-cricket-world-cup-2010-11-381449/india-vs-sri-lanka-final-433606/match-report",
+                title="2011 ICC Cricket World Cup Final",
+                stance="supports",
+                confidence=0.99,
+            )
+        ],
+    )
+    # Company units sold
+    retriever.register_evidence(
+        keywords=["company", "sold", "two million", "units", "million units"],
+        items=[
+            EvidenceItem(
+                snippet="Official regulatory filings confirm the company sold 1.2 million units in fiscal year 2023.",
+                source_url="https://sec.gov/edgar/filings/company-annual-2023.pdf",
+                title="SEC Annual Disclosure Report 2023",
+                stance="refutes",
+                confidence=0.98,
+            )
+        ],
+    )
+    # Mount Everest location
+    retriever.register_evidence(
+        keywords=["mount everest", "everest", "africa", "highest peak", "peak in africa"],
+        items=[
+            EvidenceItem(
+                snippet="Mount Everest is located in the Himalayas on the border of Nepal and China in Asia. Mount Kilimanjaro is the highest peak in Africa.",
+                source_url="https://britannica.com/place/Mount-Everest",
+                title="Encyclopaedia Britannica - Mount Everest",
+                stance="refutes",
+                confidence=0.99,
+            )
+        ],
+    )
+    return retriever
 
 
 # ---------------------------------------------------------------------------
@@ -586,7 +633,7 @@ async def test_llm_extracted_claim_flows_into_the_verification_service(
         session_manager=SessionManager(),
         websocket_manager=WebSocketManager(),
         claim_engine=claim_engine,
-        verification_engine=VerificationServiceEngine(),
+        verification_engine=VerificationServiceEngine(retriever=_seeded_mock_retriever()),
     )
     session = await SessionManager().create()
 

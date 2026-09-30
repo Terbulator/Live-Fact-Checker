@@ -49,6 +49,7 @@ class Verdict(str, Enum):
     TRUE = "TRUE"
     FALSE = "FALSE"
     UNVERIFIABLE = "UNVERIFIABLE"
+    AMBIGUOUS = "AMBIGUOUS"
 
 
 class SessionStatus(str, Enum):
@@ -160,7 +161,10 @@ class ClaimEvent(EventModel):
             "speaker": "Speaker 1",
             "timestamp": 12.4,
             "claim": "India won the 2011 Cricket World Cup.",
-            "claimType": "historical_fact"
+            "claimType": "historical_fact",
+            "entities": ["India", "2011 Cricket World Cup"],
+            "timeContext": "2011",
+            "searchHints": ["2011 Cricket World Cup final", "India Sri Lanka Wankhede"]
         }
     """
 
@@ -172,6 +176,9 @@ class ClaimEvent(EventModel):
     timestamp: float = Field(..., ge=0.0)
     claim: str = Field(..., min_length=1)
     claimType: str = Field(default="unspecified")
+    entities: List[str] = Field(default_factory=list)
+    timeContext: Optional[str] = None
+    searchHints: List[str] = Field(default_factory=list)
 
     @field_validator("type")
     @classmethod
@@ -217,6 +224,20 @@ class VerificationEvent(EventModel):
     verdict: Verdict = Field(...)
     reason: str = Field(..., min_length=1)
     source: str = Field(..., min_length=1)
+    confidence: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Confidence in the verdict, when the checker supplies one.",
+    )
+    fromCache: bool = Field(
+        default=False,
+        description=(
+            "True when this verdict was replayed from the persistent cache "
+            "rather than freshly retrieved. Lets a consumer, and stored session "
+            "history, distinguish the provenance of the answer."
+        ),
+    )
 
     @field_validator("type")
     @classmethod

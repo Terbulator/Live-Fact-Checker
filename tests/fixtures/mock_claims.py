@@ -1,12 +1,7 @@
-"""Mock Claim Events for standalone testing and demonstrations.
+"""Test fixtures for mock claim data.
 
-Covers:
-1. Clearly true claim (Historical scientific fact)
-2. Clearly false claim (Geographical falsehood)
-3. Unverifiable claim (Subjective/private claim with no public evidence)
-4. Conflicting/insufficient evidence (Contradictory reports)
-5. Numerical/statistical claim (Agreed contract sample from prompt)
-6. Numerical exaggeration claim (Economic statistics)
+These are hardcoded test claims used ONLY by unit tests.
+They must NEVER be imported by production code.
 """
 
 from typing import Any, Dict, List

@@ -13,6 +13,7 @@ class VerdictType(str, Enum):
     TRUE = "True"
     FALSE = "False"
     UNVERIFIABLE = "Unverifiable"
+    AMBIGUOUS = "Ambiguous"
 
 
 class ClaimEvent(BaseModel):

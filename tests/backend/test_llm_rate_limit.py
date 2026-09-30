@@ -647,9 +647,10 @@ async def test_strict_mode_still_refuses_the_rule_based_fallback(
     assert "gateway unreachable" in str(excinfo.value)
 
 
-async def test_non_strict_mode_still_falls_back_on_a_gateway_failure(
+async def test_non_strict_mode_returns_empty_on_gateway_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Non-strict mode returns no claims when the gateway fails (no hardcoded fallback)."""
     _scripted_gateway(monkeypatch, httpx.ConnectError("gateway unreachable"))
     engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
 
@@ -657,7 +658,7 @@ async def test_non_strict_mode_still_falls_back_on_a_gateway_failure(
         _transcript("s1", "India won the 2011 Cricket World Cup.")
     )
 
-    assert [c.claim for c in claims] == ["India won the 2011 Cricket World Cup."]
+    assert claims == []
 
 
 async def test_strict_mode_missing_credentials_still_raise(

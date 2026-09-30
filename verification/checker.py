@@ -38,6 +38,17 @@ CONFLICT_SIGNALS = [
     r"\bmixed reports\b",
 ]
 
+# Keywords indicating multiple valid interpretations / ambiguity
+AMBIGUITY_SIGNALS = [
+    r"\bdepends\b",
+    r"\bmay refer to\b",
+    r"\bmultiple\b",
+    r"\bvarious\b",
+    r"\bambiguous\b",
+    r"\buncertain\b",
+    r"\binterpretation\b",
+]
+
 
 NUM_WORD_MAP = {
     "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
@@ -100,10 +111,24 @@ class VerificationChecker:
             for e in usable_evidence
         )
 
+        # Check for ambiguity signals - multiple valid interpretations
+        text_has_ambiguity = any(
+            any(re.search(pat, e.snippet, re.IGNORECASE) for pat in AMBIGUITY_SIGNALS)
+            for e in usable_evidence
+        )
+
         if has_conflict_stance or has_opposing_stances or text_has_conflict:
             return (
                 VerdictType.UNVERIFIABLE,
                 "Available sources provide conflicting or inconclusive information regarding this claim.",
+                usable_evidence[0].source_url,
+            )
+
+        # If evidence explicitly mentions multiple valid interpretations, return AMBIGUOUS
+        if text_has_ambiguity:
+            return (
+                VerdictType.AMBIGUOUS,
+                "Available sources indicate this claim has multiple valid interpretations depending on context.",
                 usable_evidence[0].source_url,
             )
 

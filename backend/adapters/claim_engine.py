@@ -323,9 +323,29 @@ class LLMClaimEngine(ClaimEngine):
             if not isinstance(claim_type, str) or not claim_type.strip():
                 claim_type = "other_checkable_fact"
 
+            # Extract optional enrichment fields.
+            entities = item.get("entities")
+            if not isinstance(entities, list):
+                entities = []
+            else:
+                entities = [str(e) for e in entities if isinstance(e, (str, int, float))]
+
+            time_context = item.get("timeContext") or item.get("time_context")
+            if not isinstance(time_context, str) or not time_context.strip():
+                time_context = None
+
+            search_hints = item.get("searchHints") or item.get("search_hints")
+            if not isinstance(search_hints, list):
+                search_hints = []
+            else:
+                search_hints = [str(h) for h in search_hints if isinstance(h, (str, int, float))]
+
             validated.append({
                 "claim": claim_text.strip(),
-                "claimType": claim_type.strip()
+                "claimType": claim_type.strip(),
+                "entities": entities,
+                "timeContext": time_context,
+                "searchHints": search_hints,
             })
 
         # Debug: a non-empty LLM payload that yields zero claims is a contract
@@ -405,7 +425,10 @@ class LLMClaimEngine(ClaimEngine):
                     speaker=transcript.speaker,
                     timestamp=transcript.timestamp,
                     claim=claim_text,
-                    claimType=item.get("claimType", "other_checkable_fact")
+                    claimType=item.get("claimType", "other_checkable_fact"),
+                    entities=item.get("entities", []),
+                    timeContext=item.get("timeContext"),
+                    searchHints=item.get("searchHints", []),
                 )
             )
 
@@ -626,33 +649,33 @@ class LLMClaimEngine(ClaimEngine):
 
     def _build_prompt(self, text: str) -> str:
         return f"""
-Analyze the following transcript segment and identify ONLY discrete, objectively checkable factual claims (such as statistics, dates, names, historical events, quantities).
-Ignore opinions, preferences, jokes, greetings, filler text, future predictions, or subjective feelings.
+Analyze the following transcript segment and extract ALL factual claims that could be verified against evidence.
+Include claims about: statistics, dates, names, historical events, quantities, locations, scientific facts, 
+political statements, current events, product releases, sports results, quotes, and any other objectively checkable statements.
+
+Even if a claim is ambiguous, uncertain, time-sensitive, or about an unfamiliar topic, extract it.
+Do not filter claims based on whether you know the answer.
+
 Return valid JSON matching this schema:
 {{
   "claims": [
     {{
       "claim": "string",
-      "claimType": "historical_fact | statistic | date | person | location | scientific_fact | quote | other_checkable_fact"
+      "claimType": "historical_fact | statistic | date | person | location | scientific_fact | quote | current_event | political | sports | product | other_checkable_fact",
+      "entities": ["key entities mentioned"],
+      "timeContext": "time reference if present (e.g., '2025', 'this month', 'recent')",
+      "searchHints": ["useful search terms for verification"]
     }}
   ]
 }}
-If there are no checkable claims, return {{"claims": []}}.
+If there are no factual claims, return {{"claims": []}}.
 
 Transcript: "{text}"
 """
 
     def _get_fallback_claims(self, text: str) -> List[Dict[str, Any]]:
-        text_lower = text.lower()
-        extracted = []
-        if "2011 cricket world cup" in text_lower or "india won" in text_lower:
-            extracted.append({
-                "claim": "India won the 2011 Cricket World Cup.",
-                "claimType": "historical_fact"
-            })
-        elif "company sold two million units" in text_lower:
-            extracted.append({
-                "claim": "The company sold two million units.",
-                "claimType": "statistic"
-            })
-        return extracted
+        # No hardcoded fallbacks. In strict mode, a missing gateway produces a
+        # structured error; in non-strict mode we return no claims rather than
+        # fabricating predefined answers. This forces real-mode to use the
+        # actual LLM gateway for all claim extraction.
+        return []

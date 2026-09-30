@@ -23,17 +23,21 @@ ownership of ``sessionId`` in both directions.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import asyncio
 
+from backend.logging_config import get_logger
 from backend.schemas import ClaimEvent, VerificationEvent, Verdict
+
+logger = get_logger("verification")
 
 #: Internal ``verification`` verdict -> external wire verdict.
 VERDICT_TO_WIRE: Dict[str, Verdict] = {
     "True": Verdict.TRUE,
     "False": Verdict.FALSE,
     "Unverifiable": Verdict.UNVERIFIABLE,
+    "Ambiguous": Verdict.AMBIGUOUS,
 }
 
 #: External wire verdict -> internal ``verification`` verdict.
@@ -41,6 +45,7 @@ WIRE_TO_VERDICT: Dict[str, str] = {
     Verdict.TRUE.value: "True",
     Verdict.FALSE.value: "False",
     Verdict.UNVERIFIABLE.value: "Unverifiable",
+    Verdict.AMBIGUOUS.value: "Ambiguous",
 }
 
 
@@ -156,6 +161,82 @@ class VerificationServiceEngine(VerificationEngine):
             reason=internal.reason,
             source=internal.source,
         )
+
+
+class CachedVerificationEngine(VerificationEngine):
+    """Read-through cache in front of a real verification engine.
+
+    A claim already verified recently is answered from the persistent store
+    instead of re-running the search provider, which is both cheaper and one
+    less source of rate limiting. Identity fields are always rebound from the
+    incoming claim, so a cached verdict never leaks another session's
+    ``claimId`` or ``sessionId``.
+
+    Correctness guards
+    ------------------
+    * The cache is only ever constructed around a **strict** engine. That is the
+      single configuration in which the rule-based fallback extractor cannot
+      run, so a hardcoded fact cannot enter the store.
+    * On any store failure the lookup returns ``None`` and retrieval proceeds,
+      so a database outage degrades to live verification instead of failing.
+    * The verdict, reason, source and confidence are replayed verbatim. Nothing
+      is synthesised: a miss simply performs the real retrieval.
+    """
+
+    name = "cached-verification-engine"
+
+    def __init__(
+        self,
+        inner: VerificationEngine,
+        store: Any,
+        *,
+        provider_name: str = "tavily",
+    ) -> None:
+        self._inner = inner
+        self._store = store
+        self._provider_name = provider_name
+
+    @property
+    def inner_name(self) -> str:
+        return self._inner.name
+
+    async def verify(self, claim: ClaimEvent) -> VerificationEvent:
+        from backend.persistence.store import normalize_claim_key
+
+        claim_key = normalize_claim_key(claim.claim)
+
+        cached = await self._store.get_cached_verification(claim_key)
+        if cached is not None:
+            logger.debug(
+                "Serving claim %s from the persistent cache (provider %s).",
+                claim.claimId,
+                cached.provider or "unknown",
+            )
+            return VerificationEvent(
+                type="verification",
+                claimId=claim.claimId,
+                sessionId=claim.sessionId,
+                speaker=claim.speaker,
+                timestamp=claim.timestamp,
+                verdict=cached.verdict,
+                reason=cached.reason,
+                source=cached.source,
+                confidence=cached.confidence,
+                fromCache=True,
+            )
+
+        verification = await self._inner.verify(claim)
+
+        await self._store.put_cached_verification(
+            claim_key=claim_key,
+            verdict=verification.verdict,
+            reason=verification.reason,
+            source=verification.source,
+            confidence=verification.confidence,
+            provider=self._provider_name,
+            session_id=claim.sessionId,
+        )
+        return verification
 
 
 class UnavailableVerificationEngine(VerificationEngine):

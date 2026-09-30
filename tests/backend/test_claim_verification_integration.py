@@ -5,6 +5,7 @@ Verifies the end-to-end flow:
     -> VerificationEngine (VerificationServiceEngine) -> VerificationEvent
 """
 
+import json
 import pytest
 from backend.adapters.claim_engine import LLMClaimEngine
 from backend.adapters.verification import VerificationServiceEngine
@@ -12,14 +13,62 @@ from backend.router import EventRouter
 from backend.schemas import TranscriptEvent, Verdict
 from backend.session_manager import SessionManager
 from backend.websocket_manager import WebSocketManager
-from verification.models import VerdictType
+from verification.models import VerdictType, EvidenceItem
 from verification.service import VerificationService
+from verification.retriever import MockRetriever
+from tests.backend.test_llm_claim_engine import _stub_gateway, _claims_json, _settings, GATEWAY_KEY
+
+
+def _seeded_mock_retriever() -> MockRetriever:
+    """Create a MockRetriever with the standard test knowledge base."""
+    retriever = MockRetriever()
+    # Cricket World Cup 2011
+    retriever.register_evidence(
+        keywords=["cricket", "world cup", "2011", "india won", "india"],
+        items=[
+            EvidenceItem(
+                snippet="India won the 2011 ICC Cricket World Cup, defeating Sri Lanka in the final at Wankhede Stadium in Mumbai.",
+                source_url="https://www.espncricinfo.com/series/icc-cricket-world-cup-2010-11-381449/india-vs-sri-lanka-final-433606/match-report",
+                title="2011 ICC Cricket World Cup Final",
+                stance="supports",
+                confidence=0.99,
+            )
+        ],
+    )
+    # Company units sold
+    retriever.register_evidence(
+        keywords=["company", "sold", "two million", "units", "million units"],
+        items=[
+            EvidenceItem(
+                snippet="Official regulatory filings confirm the company sold 1.2 million units in fiscal year 2023.",
+                source_url="https://sec.gov/edgar/filings/company-annual-2023.pdf",
+                title="SEC Annual Disclosure Report 2023",
+                stance="refutes",
+                confidence=0.98,
+            )
+        ],
+    )
+    # Mount Everest location
+    retriever.register_evidence(
+        keywords=["mount everest", "everest", "africa", "highest peak", "peak in africa"],
+        items=[
+            EvidenceItem(
+                snippet="Mount Everest is located in the Himalayas on the border of Nepal and China in Asia. Mount Kilimanjaro is the highest peak in Africa.",
+                source_url="https://britannica.com/place/Mount-Everest",
+                title="Encyclopaedia Britannica - Mount Everest",
+                stance="refutes",
+                confidence=0.99,
+            )
+        ],
+    )
+    return retriever
 
 
 @pytest.mark.asyncio
-async def test_claim_to_verification_true_verdict():
-    """Verify that Atif's demo claim extracts and Nayanika's engine verifies it as TRUE."""
-    claim_engine = LLMClaimEngine()
+async def test_claim_to_verification_true_verdict(monkeypatch: pytest.MonkeyPatch):
+    """Verify that a claim extracts and verifies as TRUE via dynamic search."""
+    _stub_gateway(monkeypatch, _claims_json(("India won the 2011 Cricket World Cup.", "historical_fact")))
+    claim_engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
     transcript = TranscriptEvent(
         type="transcript",
         sessionId="sess_test_101",
@@ -35,7 +84,7 @@ async def test_claim_to_verification_true_verdict():
     assert claim.claimId == "sess_test_101_claim_001"
     assert "India won the 2011 Cricket World Cup" in claim.claim
 
-    verif_engine = VerificationServiceEngine()
+    verif_engine = VerificationServiceEngine(retriever=_seeded_mock_retriever())
     verification = await verif_engine.verify(claim)
 
     assert verification.type == "verification"
@@ -47,9 +96,10 @@ async def test_claim_to_verification_true_verdict():
 
 
 @pytest.mark.asyncio
-async def test_claim_to_verification_false_verdict():
-    """Verify that numerical exaggeration extracts and verifies as FALSE."""
-    claim_engine = LLMClaimEngine()
+async def test_claim_to_verification_false_verdict(monkeypatch: pytest.MonkeyPatch):
+    """Verify that a false claim extracts and verifies as FALSE via dynamic search."""
+    _stub_gateway(monkeypatch, _claims_json(("The company sold two million units in the quarter.", "statistic")))
+    claim_engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
     transcript = TranscriptEvent(
         type="transcript",
         sessionId="sess_test_102",
@@ -63,7 +113,7 @@ async def test_claim_to_verification_false_verdict():
     assert len(claims) == 1
     claim = claims[0]
 
-    verif_engine = VerificationServiceEngine()
+    verif_engine = VerificationServiceEngine(retriever=_seeded_mock_retriever())
     verification = await verif_engine.verify(claim)
 
     assert verification.type == "verification"
@@ -74,28 +124,15 @@ async def test_claim_to_verification_false_verdict():
 
 def test_direct_verification_service_interface():
     """Verify that verification.VerificationService accepts ClaimEvent and returns VerdictType."""
-    claim_engine = LLMClaimEngine()
-    transcript = TranscriptEvent(
-        type="transcript",
-        sessionId="sess_test_103",
-        speaker="Speaker 2",
-        text="India won the 2011 Cricket World Cup.",
-        timestamp=4.0,
-        isFinal=True,
-    )
-    # Using fallback claims helper directly
-    fallback = claim_engine._get_fallback_claims(transcript.text)
-    assert len(fallback) == 1
-
-    svc = VerificationService()
+    svc = VerificationService(retriever=_seeded_mock_retriever())
     result = svc.verify_claim({
         "type": "claim",
         "claimId": "claim_999",
         "speaker": "Speaker 2",
-        "claim": fallback[0]["claim"],
+        "claim": "India won the 2011 Cricket World Cup.",
         "timestamp": 4.0,
         "sessionId": "sess_test_103",
-        "claimType": fallback[0]["claimType"],
+        "claimType": "historical_fact",
     })
 
     assert result.claimId == "claim_999"
@@ -103,12 +140,13 @@ def test_direct_verification_service_interface():
 
 
 @pytest.mark.asyncio
-async def test_event_router_end_to_end():
+async def test_event_router_end_to_end(monkeypatch: pytest.MonkeyPatch):
     """Verify EventRouter handles a transcript end-to-end with real claim and verification engines."""
+    _stub_gateway(monkeypatch, _claims_json(("India won the 2011 Cricket World Cup.", "historical_fact")))
     sessions = SessionManager()
     websockets = WebSocketManager()
-    claim_engine = LLMClaimEngine()
-    verification_engine = VerificationServiceEngine()
+    claim_engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
+    verification_engine = VerificationServiceEngine(retriever=_seeded_mock_retriever())
 
     router = EventRouter(
         session_manager=sessions,
@@ -139,9 +177,10 @@ async def test_event_router_end_to_end():
 
 
 @pytest.mark.asyncio
-async def test_claim_deduplication_session_isolation():
+async def test_claim_deduplication_session_isolation(monkeypatch: pytest.MonkeyPatch):
     """Same claim in different sessions must both be processed; duplicate in same session filtered."""
-    claim_engine = LLMClaimEngine()
+    _stub_gateway(monkeypatch, _claims_json(("India won the 2011 Cricket World Cup.", "historical_fact")))
+    claim_engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
 
     # Session A: first occurrence
     transcript_a = TranscriptEvent(
@@ -179,9 +218,10 @@ async def test_claim_deduplication_session_isolation():
 
 
 @pytest.mark.asyncio
-async def test_claim_id_unique_across_sessions():
+async def test_claim_id_unique_across_sessions(monkeypatch: pytest.MonkeyPatch):
     """Claim IDs must include session prefix to prevent collisions."""
-    claim_engine = LLMClaimEngine()
+    _stub_gateway(monkeypatch, _claims_json(("India won the 2011 Cricket World Cup.", "historical_fact")))
+    claim_engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
 
     transcript_a = TranscriptEvent(
         type="transcript",
