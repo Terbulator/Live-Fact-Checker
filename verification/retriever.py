@@ -1,20 +1,45 @@
 """Evidence retriever module.
 
 Defines the abstract EvidenceRetriever interface and provides a zero-dependency
-MockRetriever for local development and testing, along with an extensible stub for
-connecting real web search engines (Tavily, Serper, Bing, etc.) in the future.
+MockRetriever for local development and testing, plus WebSearchRetriever, which
+delegates to a real search provider (see :mod:`verification.search_providers`)
+and converts its records into EvidenceItem objects.
+
+A retriever never invents evidence. A provider that returns nothing usable
+yields ``[]``, and the checker turns that into an Unverifiable verdict; only a
+genuine provider fault raises.
 """
 
 import os
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 import re
 
 from verification.models import EvidenceItem
+from verification.search_providers import (
+    SearchProvider,
+    SearchProviderError,
+    SearchRateLimitError,
+    build_search_provider,
+)
 
 
 class RetrieverError(Exception):
     """Base exception for retrieval errors."""
+
+
+class RetrieverRateLimitError(RetrieverError):
+    """The search provider rate limited us and the retry budget ran out.
+
+    Distinct from a plain :class:`RetrieverError` so the caller can tell a
+    transient throttle apart from a broken integration, without inventing a
+    verdict from absent evidence. Subclasses the existing base so every current
+    ``except RetrieverError`` keeps working.
+    """
+
+    def __init__(self, message: str, *, attempts: int = 0) -> None:
+        super().__init__(message)
+        self.attempts = attempts
     pass
 
 
@@ -201,71 +226,122 @@ class MockRetriever(EvidenceRetriever):
 
 
 class WebSearchRetriever(EvidenceRetriever):
-    """Provider-independent web search retriever.
+    """Web search retriever backed by a real search provider.
 
-    Supports plugging in any external web search provider (e.g., Tavily, Serper,
-    Google Custom Search, Bing) by providing an API key or custom search handler.
-    If no search handler is provided and no SEARCH_API_KEY is found, raises
-    RetrieverConfigurationError.
+    The provider is chosen by ``SEARCH_PROVIDER`` (default ``tavily``) and
+    reached over plain JSON/HTTPS, so no vendor SDK is required. An explicit
+    ``provider_client`` wins over name resolution, which is how tests inject a
+    stub and never touch the network.
+
+    A custom ``search_handler`` still short-circuits everything, preserving the
+    original extension point. If neither a handler nor a credential is
+    configured, :class:`RetrieverConfigurationError` is raised rather than
+    silently degrading to mock evidence.
     """
+
+    DEFAULT_PROVIDER = "tavily"
+
+    #: Relevance assumed when a provider supplies no score. Deliberately the
+    #: checker's own threshold, not 1.0: an unscored result has unknown
+    #: relevance and must not be treated as maximally trustworthy evidence.
+    DEFAULT_UNSCORED_CONFIDENCE = 0.60
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        provider: str = "generic",
+        provider: Optional[str] = None,
         search_handler: Optional[Callable[[str, int], List[EvidenceItem]]] = None,
+        provider_client: Optional[SearchProvider] = None,
     ):
         """Initializes the web search retriever.
 
         Args:
             api_key: Optional API key. If omitted, falls back to SEARCH_API_KEY env var.
-            provider: Informative name of the provider (e.g. 'tavily', 'serper', 'google').
-            search_handler: Optional callable executing the search and returning EvidenceItem list.
+            provider: Provider name (e.g. 'tavily'). Defaults to SEARCH_PROVIDER
+                env var, then to DEFAULT_PROVIDER.
+            search_handler: Optional callable returning an EvidenceItem list;
+                short-circuits provider resolution entirely.
+            provider_client: Optional prebuilt SearchProvider, used ahead of name
+                resolution. This is the seam the tests stub.
         """
         self.api_key = api_key or os.getenv("SEARCH_API_KEY")
-        self.provider = provider
+        self.provider = provider or os.getenv("SEARCH_PROVIDER") or self.DEFAULT_PROVIDER
         self.search_handler = search_handler
+        self.provider_client = provider_client
 
     @property
     def is_configured(self) -> bool:
         """Returns True if an API key or custom search handler is configured."""
         return bool(self.search_handler or (self.api_key and self.api_key.strip()))
 
+    def _resolve_provider(self) -> SearchProvider:
+        """Build the provider client on first use and cache it.
+
+        Deferred so a misconfigured deployment still starts and reports the
+        problem per request, instead of failing at import or app startup.
+        """
+        if self.provider_client is not None:
+            return self.provider_client
+        try:
+            self.provider_client = build_search_provider(self.provider, self.api_key)
+        except SearchProviderError as exc:
+            raise RetrieverConfigurationError(str(exc)) from exc
+        return self.provider_client
+
     @classmethod
     def parse_search_results(cls, raw_results: List[dict]) -> List[EvidenceItem]:
-        """Convenience utility to convert generic search API JSON items into EvidenceItem models.
+        """Convert generic search API items into EvidenceItem models.
 
         Accepts items with standard keys like:
         {'title': ..., 'snippet' / 'content' / 'body': ..., 'url' / 'link': ..., 'confidence' / 'score': ...}
+
+        Records that cannot be attributed are dropped, never backfilled: a
+        result with no snippet has nothing to compare, and one with no URL
+        cannot be cited, so substituting a placeholder would put a fabricated
+        source in front of the user as if it were real.
         """
         parsed_items: List[EvidenceItem] = []
         for item in raw_results:
+            if not isinstance(item, dict):
+                continue
             snippet = item.get("snippet") or item.get("content") or item.get("body") or ""
-            source_url = item.get("url") or item.get("link") or item.get("source") or "https://example.com"
+            source_url = item.get("url") or item.get("link") or item.get("source")
+            snippet_text = snippet.strip() if isinstance(snippet, str) else ""
+            url_text = str(source_url).strip() if source_url else ""
+            if not snippet_text or not url_text:
+                continue
             title = item.get("title")
-            raw_conf = item.get("confidence") or item.get("score") or 1.0
-            try:
-                confidence = float(raw_conf)
-                confidence = max(0.0, min(1.0, confidence))
-            except (ValueError, TypeError):
-                confidence = 1.0
+            # Checked against None rather than by truthiness: a legitimate
+            # score of 0.0 is a real (if useless) value, not a missing one.
+            raw_conf = item.get("confidence")
+            if raw_conf is None:
+                raw_conf = item.get("score")
+            if raw_conf is None:
+                confidence = cls.DEFAULT_UNSCORED_CONFIDENCE
+            else:
+                try:
+                    confidence = max(0.0, min(1.0, float(raw_conf)))
+                except (ValueError, TypeError):
+                    confidence = cls.DEFAULT_UNSCORED_CONFIDENCE
 
-            if snippet.strip():
-                parsed_items.append(
-                    EvidenceItem(
-                        snippet=snippet.strip(),
-                        source_url=str(source_url).strip(),
-                        title=title.strip() if title else None,
-                        confidence=confidence,
-                    )
+            parsed_items.append(
+                EvidenceItem(
+                    snippet=snippet_text,
+                    source_url=url_text,
+                    title=title.strip() if isinstance(title, str) and title.strip() else None,
+                    confidence=confidence,
                 )
+            )
         return parsed_items
 
     def retrieve(self, query: str, max_results: int = 3) -> List[EvidenceItem]:
-        """Retrieves evidence snippets for the query.
+        """Retrieves evidence snippets for the query from the search provider.
 
-        If a custom search_handler was provided, delegates to it.
-        Otherwise, if no API key is configured, raises RetrieverConfigurationError.
+        Returns [] when the provider has nothing useful to offer, which the
+        checker reports as Unverifiable. Raises :class:`RetrieverError` when the
+        provider call itself fails and :class:`RetrieverRateLimitError` when it
+        was throttled, so neither a broken integration nor a transient throttle
+        is ever mistaken for an absence of evidence.
         """
         if not query or not query.strip():
             return []
@@ -279,31 +355,44 @@ class WebSearchRetriever(EvidenceRetriever):
                 "Set the SEARCH_API_KEY environment variable or use MockRetriever for offline testing."
             )
 
-        # Provider stub: When an external provider client is wired in, this delegates to it.
-        # Until then, returns empty evidence without inventing fake external data.
-        return []
+        provider = self._resolve_provider()
+        try:
+            raw_results = provider.search(query, max_results)
+        except SearchRateLimitError as exc:
+            raise RetrieverRateLimitError(
+                str(exc), attempts=exc.attempts
+            ) from exc
+        except SearchProviderError as exc:
+            raise RetrieverError(str(exc)) from exc
+        return self.parse_search_results(raw_results)[:max_results]
 
 
 def create_default_retriever(
     use_mock: Optional[bool] = None,
     api_key: Optional[str] = None,
+    provider: Optional[str] = None,
 ) -> EvidenceRetriever:
     """Factory creating the appropriate retriever based on configuration.
 
     Args:
-        use_mock: If True, explicitly returns MockRetriever. If False, returns WebSearchRetriever.
-                  If None, auto-selects WebSearchRetriever if SEARCH_API_KEY is present,
-                  otherwise defaults safely to MockRetriever.
+        use_mock: If True, explicitly returns MockRetriever. If False, always
+                  returns WebSearchRetriever -- real mode never falls back to
+                  mock evidence. If None, auto-selects WebSearchRetriever when a
+                  key is present, otherwise MockRetriever.
         api_key: Optional API key override for WebSearchRetriever.
+        provider: Optional provider name override for WebSearchRetriever.
     """
     if use_mock is True:
         return MockRetriever()
 
-    resolved_key = api_key or os.getenv("SEARCH_API_KEY")
-    if use_mock is False:
-        return WebSearchRetriever(api_key=resolved_key)
+    if provider is None:
+        provider = os.getenv("SEARCH_PROVIDER") or WebSearchRetriever.DEFAULT_PROVIDER
 
+    if use_mock is False:
+        return WebSearchRetriever(api_key=api_key or os.getenv("SEARCH_API_KEY"), provider=provider)
+
+    resolved_key = api_key or os.getenv("SEARCH_API_KEY")
     if resolved_key and resolved_key.strip():
-        return WebSearchRetriever(api_key=resolved_key.strip())
+        return WebSearchRetriever(api_key=resolved_key.strip(), provider=provider)
 
     return MockRetriever()

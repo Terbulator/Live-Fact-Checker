@@ -79,6 +79,7 @@ whether a key is **present**, never its value.
 | `ASSEMBLYAI_API_KEY` | *(empty)* | AssemblyAI realtime STT (Tushar) |
 | `LLM_GATEWAY_API_KEY` | *(empty)* | Claim extraction via LLM gateway (Atif) |
 | `SEARCH_API_KEY` | *(empty)* | Evidence retrieval / web search (Nayanika) |
+| `SEARCH_PROVIDER` | `tavily` | Which search provider backs `WebSearchRetriever` |
 
 A wildcard `*` in `CORS_ORIGINS` is rejected when `ENVIRONMENT=production`.
 
@@ -509,12 +510,50 @@ result_dict = service.verify_claim_dict(claim_dict)
 
 ---
 
-## Integrating Real Search Providers
+## Evidence Retrieval (Real Search)
 
-To connect a live search API (e.g. Tavily, Google Custom Search, Serper, Bing) during later integration stages:
+Real mode (`USE_MOCK_ENGINES=false`) verifies claims against a live search
+provider. `MockRetriever` is used **only** when `USE_MOCK_ENGINES=true` or by the
+test suite; real mode never substitutes it, so a verdict is always backed by
+real retrieval.
 
-1. Provide `SEARCH_API_KEY` in `.env` (or pass `api_key` to `WebSearchRetriever`).
-2. Alternatively, inject a custom `search_handler` callable directly into `WebSearchRetriever`:
+### Configuring Tavily
+
+Tavily is the registered provider. It needs one credential and nothing else:
+
+```bash
+USE_MOCK_ENGINES=false
+SEARCH_PROVIDER=tavily          # default; the only registered adapter
+SEARCH_API_KEY=tvly-...         # from https://app.tavily.com
+```
+
+It calls `POST https://api.tavily.com/search` with
+`Authorization: Bearer $SEARCH_API_KEY`, and maps each result's `title`, `url`,
+`content` and `score` onto an `EvidenceItem`.
+
+### Behaviour that matters
+
+* **No fabricated evidence.** A result with no URL is dropped, never given a
+  placeholder citation. A result with no score is treated as minimally relevant
+  (`0.60`), not maximally trustworthy (`1.0`).
+* **No results means `Unverifiable`.** If the search returns nothing usable, the
+  retriever returns `[]` and the checker produces `UNVERIFIABLE` — it never
+  guesses.
+* **Missing `SEARCH_API_KEY` or an unknown `SEARCH_PROVIDER`** raises a
+  configuration error, which the backend reports per claim as a structured
+  `VERIFICATION_FAILED` event. It does not fall back to mock evidence.
+* **HTTP 429 is retried** up to 2 times, honouring `Retry-After` and otherwise
+  backing off exponentially, with every wait clamped to 8s. Once the budget is
+  spent the failure is reported as `VERIFICATION_FAILED` naming the rate limit.
+  Other HTTP errors (401/403/404, 5xx) fail immediately and are not retried.
+
+### Adding another provider
+
+Implement `SearchProvider` in `verification/search_providers.py`, register it in
+`PROVIDERS`, and it becomes selectable via `SEARCH_PROVIDER`. No changes to
+`checker.py`, `models.py`, `service.py` or the backend adapters are needed.
+
+A custom search function can still bypass the provider layer entirely:
 
 ```python
 from verification import VerificationService, WebSearchRetriever
@@ -528,6 +567,4 @@ result = service.verify_claim(claim_dict)
 ```
 
 Read the API key from the environment; never hardcode it.
-
-No modifications to `checker.py`, `models.py`, or `service.py` are needed when switching search backends.
 

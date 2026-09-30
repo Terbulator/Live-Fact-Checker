@@ -40,6 +40,44 @@ REFERENCE_SOURCE = "https://example.com/source"
 REFERENCE_REASON = "India defeated Sri Lanka in the 2011 final."
 
 
+class _StubSearchProvider:
+    """Offline stand-in for a live search provider.
+
+    Real mode must now reach a real retriever, so tests that exercise the
+    pipeline inject this rather than relying on mock evidence being selected.
+    """
+
+    name = "stub"
+
+    def __init__(self, records):
+        self.records = records
+        self.calls = []
+
+    def search(self, query, max_results=3):
+        self.calls.append((query, max_results))
+        return list(self.records)[:max_results]
+
+
+def _stubbed_real_verification_engine(records=None):
+    """A VerificationServiceEngine backed by a stubbed search provider."""
+    from verification.retriever import WebSearchRetriever
+
+    provider = _StubSearchProvider(
+        records
+        if records is not None
+        else [
+            {
+                "title": "ICC Cricket World Cup 2011 final",
+                "url": "https://www.espncricinfo.com/final-report",
+                "content": "India won the 2011 Cricket World Cup.",
+                "score": 0.93,
+            }
+        ]
+    )
+    retriever = WebSearchRetriever(api_key="stub-key", provider="stub", provider_client=provider)
+    return VerificationServiceEngine(retriever=retriever), provider
+
+
 def _reference_claim(session_id: str, claim_id: str = "claim_001") -> ClaimEvent:
     return ClaimEvent(
         claimId=claim_id,
@@ -397,10 +435,17 @@ def test_real_engine_verifies_claims_through_the_running_pipeline(
 ) -> None:
     """A mock-extracted claim is verified by the real verification module.
 
-    No API key is present in the test environment: the service runs on its
-    default offline retriever.
+    Real mode no longer inherits the offline MockRetriever, so the search
+    provider is stubbed here: the point of the test is that the real engine,
+    verdict translation and identity preservation work through the running
+    pipeline, not that a live search is reachable.
     """
-    app = create_app(settings=REAL_SETTINGS, claim_engine=claim_engine)
+    verification_engine, provider = _stubbed_real_verification_engine()
+    app = create_app(
+        settings=REAL_SETTINGS,
+        claim_engine=claim_engine,
+        verification_engine=verification_engine,
+    )
     with TestClient(app) as client:
         session = client.post("/session/start", json={}).json()["sessionId"]
         response = client.post(
@@ -414,7 +459,10 @@ def test_real_engine_verifies_claims_through_the_running_pipeline(
     verification = body["verifications"][0]
     assert verification["verdict"] in {"TRUE", "FALSE", "UNVERIFIABLE"}
     assert verification["reason"]
-    assert verification["source"]
+    # A real source, not a placeholder invented by the retriever.
+    assert verification["source"] == "https://www.espncricinfo.com/final-report"
+    # The live retriever was actually consulted for this claim.
+    assert len(provider.calls) == 1
     # sessionId stays backend-owned across the real-engine boundary.
     assert verification["sessionId"] == session
     assert verification["claimId"] == body["claims"][0]["claimId"]

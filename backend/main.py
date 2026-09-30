@@ -80,8 +80,14 @@ def _default_verification_engine(settings: Settings) -> VerificationEngine:
     """Pick the verification engine from the single ``use_mock_engines`` switch.
 
     * mock mode -> :class:`MockVerificationEngine`, fully offline
-    * real mode  -> :class:`VerificationServiceEngine`, which runs the existing
-      ``verification`` package and needs no code change to activate
+    * real mode  -> :class:`VerificationServiceEngine` over the existing
+      ``verification`` package, with a live
+      :class:`~verification.retriever.WebSearchRetriever`
+
+    ``use_mock=False`` is passed explicitly so real mode can never silently
+    inherit the offline ``MockRetriever``: a missing ``SEARCH_API_KEY`` must
+    surface as a structured ``VERIFICATION_FAILED`` event rather than as
+    confident verdicts backed by hardcoded records.
 
     If the ``verification`` package cannot be imported the backend degrades to
     :class:`UnavailableVerificationEngine` instead of failing to start, so every
@@ -90,7 +96,19 @@ def _default_verification_engine(settings: Settings) -> VerificationEngine:
     if settings.use_mock_engines:
         return MockVerificationEngine()
     try:
-        return VerificationServiceEngine()
+        from verification.retriever import create_default_retriever
+
+        search_key = (
+            settings.search_api_key.get_secret_value()
+            if settings.search_api_key is not None
+            else None
+        )
+        retriever = create_default_retriever(
+            use_mock=False,
+            api_key=search_key,
+            provider=settings.search_provider,
+        )
+        return VerificationServiceEngine(retriever=retriever)
     except Exception as exc:  # noqa: BLE001 - a missing module must not kill startup
         logger.warning(
             "Real verification unavailable, falling back to the stub engine: %s",

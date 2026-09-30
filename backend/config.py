@@ -85,6 +85,14 @@ class Settings(BaseSettings):
         description="Model name to use for the LLM Gateway.",
     )
     search_api_key: Optional[SecretStr] = Field(default=None)
+    search_provider: str = Field(
+        default="tavily",
+        description=(
+            "Search provider backing WebSearchRetriever. `tavily` is the only "
+            "registered adapter; an unknown name is reported per request as a "
+            "structured VERIFICATION_FAILED event rather than at startup."
+        ),
+    )
 
     @field_validator("cors_origins", mode="before")
     @classmethod

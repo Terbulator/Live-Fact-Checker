@@ -25,6 +25,8 @@ ownership of ``sessionId`` in both directions.
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
+import asyncio
+
 from backend.schemas import ClaimEvent, VerificationEvent, Verdict
 
 #: Internal ``verification`` verdict -> external wire verdict.
@@ -110,25 +112,34 @@ class VerificationEngine(ABC):
 class VerificationServiceEngine(VerificationEngine):
     """Bridge to the existing ``verification.VerificationService``.
 
-    Runs the real, tested verification pipeline. Evidence retrieval still
-    depends on whichever retriever is injected, so with the default
-    ``MockRetriever`` it is fully offline and deterministic.
+    Runs the real, tested verification pipeline. The retriever is injected
+    explicitly: real mode must reach a live search provider, never the offline
+    ``MockRetriever``, so :func:`_default_verification_engine` builds it with
+    ``use_mock=False``.
+
+    Threading
+    ---------
+    ``verification`` is synchronous, and real retrieval performs blocking HTTP.
+    Calling it directly from this coroutine would stall the event loop for the
+    duration of the search, freezing WebSocket broadcasts for every session, so
+    the call is dispatched to a worker thread. The contract is unchanged: the
+    same verdict, reason, source and ordering.
     """
 
     name = "verification-service"
 
-    def __init__(self, service: Optional[object] = None) -> None:
+    def __init__(self, service: Optional[object] = None, retriever: Optional[object] = None) -> None:
         if service is None:
             from verification.service import VerificationService
 
-            service = VerificationService()
+            service = VerificationService(retriever=retriever)
         self._service = service
 
     async def verify(self, claim: ClaimEvent) -> VerificationEvent:
         """Run the internal pipeline and re-attach the backend-owned fields."""
         payload = to_internal_claim_payload(claim)
         try:
-            internal = self._service.verify_claim(payload)
+            internal = await asyncio.to_thread(self._service.verify_claim, payload)
         except Exception as exc:  # noqa: BLE001 - surfaced as a structured error
             raise VerificationEngineError(
                 f"Verification failed for claim {claim.claimId}: {exc}",
