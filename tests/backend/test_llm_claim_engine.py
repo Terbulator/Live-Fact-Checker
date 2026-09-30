@@ -66,11 +66,25 @@ def _transcript(session_id: str, text: str = "Some spoken words.", ts: float = 1
 
 
 class _StubResponse:
-    def __init__(self, payload: Dict[str, Any]) -> None:
+    """Mirrors the parts of ``httpx.Response`` the engine actually reads."""
+
+    def __init__(
+        self,
+        payload: Dict[str, Any],
+        status_code: int = 200,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> None:
         self._payload = payload
+        self.status_code = status_code
+        self.headers = headers or {}
 
     def raise_for_status(self) -> None:
-        return None
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                f"gateway returned {self.status_code}",
+                request=httpx.Request("POST", GATEWAY_BASE_URL),
+                response=httpx.Response(self.status_code),
+            )
 
     def json(self) -> Dict[str, Any]:
         return self._payload

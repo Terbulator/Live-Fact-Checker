@@ -30,7 +30,11 @@ owned by :class:`~backend.session_manager.SessionManager`:
 
 from typing import List, Optional, Tuple
 
-from backend.adapters.claim_engine import ClaimEngine, ClaimEngineError
+from backend.adapters.claim_engine import (
+    ClaimEngine,
+    ClaimEngineError,
+    LLMRateLimitError,
+)
 from backend.adapters.verification import VerificationEngine, VerificationEngineError
 from backend.logging_config import (
     CLAIM_CREATED,
@@ -102,6 +106,20 @@ class EventRouter:
 
         try:
             claims = await self.claim_engine.extract_claims(transcript)
+        except LLMRateLimitError as exc:
+            # Caught before ClaimEngineError, which it subclasses: a 429 is
+            # transient and self-healing, so it gets its own code rather than
+            # being reported as a broken claim engine.
+            await self.emit_error(
+                session_id,
+                ErrorCode.LLM_RATE_LIMITED,
+                "The LLM Gateway is rate limiting requests. "
+                "Claims were skipped for this segment.",
+                claimId=None,
+                recoverable=True,
+                detail=str(exc),
+            )
+            return PipelineCounts(errors=1), [], []
         except ClaimEngineError as exc:
             await self.emit_error(
                 session_id,

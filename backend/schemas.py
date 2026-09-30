@@ -79,6 +79,10 @@ class ErrorCode(str, Enum):
     MALFORMED_EVENT = "MALFORMED_EVENT"
     VERIFICATION_FAILED = "VERIFICATION_FAILED"
     CLAIM_EXTRACTION_FAILED = "CLAIM_EXTRACTION_FAILED"
+    #: The LLM Gateway answered 429 and the bounded retries were exhausted.
+    #: Kept distinct from CLAIM_EXTRACTION_FAILED so the frontend can tell a
+    #: transient rate limit apart from a genuine extraction fault.
+    LLM_RATE_LIMITED = "LLM_RATE_LIMITED"
     BROADCAST_FAILED = "BROADCAST_FAILED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
