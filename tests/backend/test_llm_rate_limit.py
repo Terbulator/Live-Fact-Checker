@@ -39,7 +39,7 @@ from backend.websocket_manager import WebSocketManager
 from tests.backend.conftest import transcript_payload
 
 GATEWAY_KEY = "test-llm-gateway-key"
-GATEWAY_BASE_URL = "https://api.assemblyai.com/llm/v1"
+GATEWAY_BASE_URL = "https://llm-gateway.assemblyai.com/v1"
 
 REAL_SETTINGS_NO_KEY = Settings(
     environment="test", use_mock_engines=False, log_level="WARNING"

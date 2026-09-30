@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     assemblyai_api_key: Optional[SecretStr] = Field(default=None)
     llm_gateway_api_key: Optional[SecretStr] = Field(default=None)
     llm_gateway_base_url: str = Field(
-        default="https://api.assemblyai.com/llm/v1",
+        default="https://llm-gateway.assemblyai.com/v1",
         description="Base URL for the LLM Gateway API (OpenAI-compatible).",
     )
     llm_gateway_model: str = Field(

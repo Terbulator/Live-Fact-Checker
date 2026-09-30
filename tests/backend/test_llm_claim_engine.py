@@ -34,7 +34,7 @@ from backend.websocket_manager import WebSocketManager
 from tests.backend.conftest import transcript_payload
 
 GATEWAY_KEY = "test-llm-gateway-key"
-GATEWAY_BASE_URL = "https://api.assemblyai.com/llm/v1"
+GATEWAY_BASE_URL = "https://llm-gateway.assemblyai.com/v1"
 GATEWAY_MODEL = "qwen3.5-4b-32k-fast"
 
 #: A real-mode deployment with no LLM credential in the environment.
