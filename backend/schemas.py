@@ -227,6 +227,11 @@ class VerificationEvent(EventModel):
     verdict: Verdict = Field(...)
     reason: str = Field(..., min_length=1)
     source: str = Field(..., min_length=1)
+    # Additive, backward-compatible extension: every citable source behind the
+    # verdict, already documented in the example above. `source` remains the
+    # single primary citation for existing consumers; this carries the rest.
+    # Defaults to an empty list, so any event built without it is still valid.
+    sources: List[Dict[str, Any]] = Field(default_factory=list)
 
     @field_validator("type")
     @classmethod

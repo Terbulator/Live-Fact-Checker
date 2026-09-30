@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.adapters.claim_engine import ClaimEngine, LLMClaimEngine
+from backend.adapters.claim_refinement import apply_claim_refinement
 from backend.adapters.verification import (
     CachedVerificationEngine,
     UnavailableVerificationEngine,
@@ -91,6 +92,13 @@ def _default_verification_engine(settings: Settings) -> VerificationEngine:
     surface as a structured ``VERIFICATION_FAILED`` event rather than as
     confident verdicts backed by hardcoded records.
 
+    The default is the unmodified existing pipeline. When
+    ``conflict_detection_enabled`` is opted into, the engine is wrapped by
+    :class:`~verification.conflict.ConflictAwareChecker`, which delegates to
+    the standard checker and returns its result untouched for every
+    non-conflicting case. That flag defaults to off precisely so enabling a
+    new quality feature never silently changes an existing verdict.
+
     If the ``verification`` package cannot be imported the backend degrades to
     :class:`UnavailableVerificationEngine` instead of failing to start, so every
     failure surfaces as a structured ``VERIFICATION_FAILED`` event.
@@ -110,6 +118,20 @@ def _default_verification_engine(settings: Settings) -> VerificationEngine:
             api_key=search_key,
             provider=settings.search_provider,
         )
+        if settings.conflict_detection_enabled:
+            # Opt-in only. `ConflictAwareChecker` subclasses the existing
+            # checker and calls `super().verify()` first, returning that
+            # result unchanged unless two independent credible sources
+            # disagree. `VerificationService` already accepted an injected
+            # checker, so no existing pipeline code is touched.
+            from verification.conflict import ConflictAwareChecker
+            from verification.service import VerificationService
+
+            return VerificationServiceEngine(
+                service=VerificationService(
+                    retriever=retriever, checker=ConflictAwareChecker()
+                )
+            )
         return VerificationServiceEngine(retriever=retriever)
     except Exception as exc:  # noqa: BLE001 - a missing module must not kill startup
         logger.warning(
@@ -212,6 +234,21 @@ def create_app(
         resolved_verification_engine = CachedVerificationEngine(
             resolved_verification_engine, store
         )
+
+    # Additive claim-intelligence layer (compound splitting, claim
+    # classification, claim-level duplicate protection).
+    #
+    # Opt-in only, and applied here -- *after* the store is built. Two reasons:
+    # the store must still see the raw engine, because strictness is the single
+    # property that makes persistence safe; and the default has to stay exactly
+    # the pipeline that was working before, so `claim_refinement_enabled`
+    # defaults to false.
+    #
+    # `RefinedClaimEngine` reports the inner engine's `name` and `strict`, so
+    # health output is identical either way.
+    resolved_claim_engine = apply_claim_refinement(
+        resolved_claim_engine, enabled=resolved_settings.claim_refinement_enabled
+    )
 
     event_router = EventRouter(
         session_manager=session_manager,

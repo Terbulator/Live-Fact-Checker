@@ -145,6 +145,42 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- P1 fact-checking quality (opt-in, off by default) --------------
+    #
+    # Both layers below are additive enhancements to a pipeline that already
+    # works. Neither changes any existing verdict: the claim layer only ever
+    # hands the existing pipeline a subset of what it was already handed, and
+    # the conflict layer delegates to the existing checker and returns its
+    # result untouched unless two independent credible sources disagree.
+    #
+    # They default to false so that deploying this code cannot silently alter
+    # the behaviour of a running system. Turn one on deliberately.
+    claim_refinement_enabled: bool = Field(
+        default=False,
+        description=(
+            "Run the additive claim-intelligence layer in front of the claim "
+            "engine: compound claims are split into their independent "
+            "assertions, text that is not a factual claim (a question, an "
+            "opinion, an instruction, small talk) is not fact-checked, and a "
+            "claim identical to one already processed in the session is "
+            "skipped. Claims classified as factual reach the existing "
+            "verification pipeline unchanged. Off by default, so the default "
+            "pipeline is exactly the one that was already working; set true to "
+            "opt in."
+        ),
+    )
+    conflict_detection_enabled: bool = Field(
+        default=False,
+        description=(
+            "Report a claim as UNVERIFIABLE when two or more credible sources "
+            "from different domains genuinely disagree and neither is clearly "
+            "better evidenced. Implemented as a subclass of the existing "
+            "checker that calls it first and returns its verdict unchanged for "
+            "every non-conflicting case, so TRUE and FALSE behaviour is "
+            "preserved. Off by default; set true to opt in."
+        ),
+    )
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
