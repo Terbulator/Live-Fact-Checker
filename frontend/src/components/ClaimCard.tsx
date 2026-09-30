@@ -13,7 +13,13 @@
  * a visible pressed state rather than looking identical when selected.
  */
 
-import { displaySpeaker, formatClock, isLinkableSource, sourceDomain } from '../lib/format'
+import {
+  collectSources,
+  displaySpeaker,
+  formatClock,
+  isLinkableSource,
+  sourceDomain,
+} from '../lib/format'
 import { describeCard } from '../lib/verdicts'
 import type { ClaimCard as ClaimCardModel } from '../types/model'
 
@@ -26,7 +32,7 @@ export interface ClaimCardProps {
 export function ClaimCard({ card, selected, onSelect }: ClaimCardProps) {
   const descriptor = describeCard(card)
   const verification = card.verification
-  const source = verification?.source ?? ''
+  const sources = verification === null ? [] : collectSources(verification)
 
   return (
     <li
@@ -70,26 +76,53 @@ export function ClaimCard({ card, selected, onSelect }: ClaimCardProps) {
       {verification !== null && (
         <div className="card__result">
           <p className="card__reason">{verification.reason}</p>
-          {source !== '' && (
-            <p className="card__source">
-              <span className="card__sourceLabel">Source</span>
-              {isLinkableSource(source) ? (
-                <a
-                  className="card__link"
-                  href={source}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  title={source}
-                >
-                  {sourceDomain(source)}
-                  <span className="card__external" aria-hidden="true">
-                    ↗
-                  </span>
-                </a>
-              ) : (
-                <span className="card__sourceText">{source}</span>
+          {sources.length > 0 && (
+            <div className="card__sources">
+              {sources.length > 1 && (
+                <p className="card__sourceLabel">
+                  Sources ({sources.length})
+                </p>
               )}
-            </p>
+              <ul className="card__sourceList">
+                {sources.map((entry) => (
+                  <li key={entry.url} className="card__sourceItem">
+                    <span className="card__source">
+                      {sources.length === 1 ? (
+                        <span className="card__sourceLabel">Source</span>
+                      ) : (
+                        <span className="card__sourceLabel">
+                          {entry.primary ? 'Primary' : 'Also'}
+                        </span>
+                      )}
+                      {isLinkableSource(entry.url) ? (
+                        <a
+                          className="card__link"
+                          href={entry.url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          title={entry.url}
+                        >
+                          {entry.title ?? sourceDomain(entry.url)}
+                          <span className="card__external" aria-hidden="true">
+                            ↗
+                          </span>
+                        </a>
+                      ) : (
+                        <span className="card__sourceText">{entry.url}</span>
+                      )}
+                      {entry.title !== null && (
+                        <span className="card__sourceDomain">
+                          {sourceDomain(entry.url)}
+                        </span>
+                      )}
+                    </span>
+                    {entry.snippet !== null && (
+                      <p className="card__snippet">{entry.snippet}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       )}

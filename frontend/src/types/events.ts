@@ -73,6 +73,19 @@ export interface ClaimEvent {
   claimType: string
 }
 
+/**
+ * One citable evidence source.
+ *
+ * Additive extension of `VerificationEvent`. The `source` string remains the
+ * contract every consumer already depends on; this carries the supporting
+ * citations beside it, ranked best-first by the backend.
+ */
+export interface EvidenceSource {
+  url: string
+  title: string | null
+  snippet: string | null
+}
+
 /** Verdict, rationale and citation for a single claim. */
 export interface VerificationEvent {
   type: 'verification'
@@ -83,7 +96,15 @@ export interface VerificationEvent {
   timestamp: number
   verdict: Verdict
   reason: string
+  /** Primary citation. Always present; unchanged by multi-source support. */
   source: string
+  /**
+   * Additional credible evidence, best first.
+   *
+   * Optional because an older backend, or a claim with no citable evidence,
+   * sends no such field. The UI must treat its absence as "one source".
+   */
+  sources?: EvidenceSource[]
 }
 
 /** A structured failure the frontend is expected to surface, not crash on. */

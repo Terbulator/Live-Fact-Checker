@@ -211,7 +211,10 @@ class VerificationEvent(EventModel):
             "timestamp": 12.4,
             "verdict": "TRUE",
             "reason": "India defeated Sri Lanka in the 2011 final.",
-            "source": "https://example.com/source"
+            "source": "https://example.com/source",
+            "sources": [
+                {"url": "https://example.com/source", "title": "Article Title", "snippet": "..."}
+            ]
         }
     """
 
@@ -224,20 +227,6 @@ class VerificationEvent(EventModel):
     verdict: Verdict = Field(...)
     reason: str = Field(..., min_length=1)
     source: str = Field(..., min_length=1)
-    confidence: Optional[float] = Field(
-        default=None,
-        ge=0.0,
-        le=1.0,
-        description="Confidence in the verdict, when the checker supplies one.",
-    )
-    fromCache: bool = Field(
-        default=False,
-        description=(
-            "True when this verdict was replayed from the persistent cache "
-            "rather than freshly retrieved. Lets a consumer, and stored session "
-            "history, distinguish the provenance of the answer."
-        ),
-    )
 
     @field_validator("type")
     @classmethod

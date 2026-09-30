@@ -38,6 +38,8 @@ from backend.adapters.claim_engine import (
 from backend.adapters.verification import VerificationEngine, VerificationEngineError
 from backend.logging_config import (
     CLAIM_CREATED,
+    CLAIM_EXTRACTION_SUCCEEDED,
+    CLAIM_EXTRACTION_ZERO_CLAIMS,
     TRANSCRIPT_RECEIVED,
     VERIFICATION_COMPLETED,
     VERIFICATION_STARTED,
@@ -163,6 +165,19 @@ class EventRouter:
                 detail=f"{type(exc).__name__}: {exc}",
             )
             return PipelineCounts(errors=1), [], []
+
+        if not claims:
+            log_trace(
+                CLAIM_EXTRACTION_ZERO_CLAIMS,
+                sessionId=session_id,
+                textLength=len(transcript.text),
+            )
+        else:
+            log_trace(
+                CLAIM_EXTRACTION_SUCCEEDED,
+                sessionId=session_id,
+                claimCount=len(claims),
+            )
 
         verifications: List[VerificationEvent] = []
         errors = 0

@@ -21,6 +21,7 @@ from verification.checker import VerificationChecker
 from verification.models import ClaimEvent, VerificationEvent
 from verification.query_generator import generate_search_query
 from verification.retriever import EvidenceRetriever, MockRetriever, create_default_retriever
+from verification.sources import primary_source, rank_sources
 
 
 class VerificationService:
@@ -82,13 +83,19 @@ class VerificationService:
         # 4. Comparison and verification
         verdict, reason, source = self.checker.verify(claim_event.claim, evidence)
 
+        # 4b. Rank every citable item the retriever returned, not just the first.
+        # `source` becomes the top-ranked citation so the primary link agrees
+        # with the list the UI renders beside it.
+        sources = rank_sources(evidence)
+
         # 5. Output contract with strictly preserved claimId
         return VerificationEvent(
             type="verification",
             claimId=claim_event.claimId,
             verdict=verdict,
             reason=reason,
-            source=source,
+            source=primary_source(sources, source),
+            sources=sources,
         )
 
     def verify_claim_dict(self, claim_input: Union[ClaimEvent, dict, object]) -> dict:

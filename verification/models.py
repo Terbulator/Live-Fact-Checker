@@ -4,7 +4,7 @@ Defines strict contracts for ClaimEvent inputs and VerificationEvent outputs.
 """
 
 from enum import Enum
-from typing import Literal, Optional
+from typing import Literal, Optional, List, Dict, Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -73,7 +73,10 @@ class VerificationEvent(BaseModel):
       "claimId": "claim_001",
       "verdict": "False",
       "reason": "The available source reports a different figure.",
-      "source": "https://example.com"
+      "source": "https://example.com",
+      "sources": [
+        {"url": "https://example.com", "title": "Article Title", "snippet": "..."}
+      ]
     }
     """
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -100,6 +103,9 @@ class VerificationEvent(BaseModel):
         ...,
         description="Primary evidence URL or authoritative source reference"
     )
+    # Backward-compatible extension: multiple evidence sources.
+    # Each entry: {"url": str, "title": str|None, "snippet": str|None}
+    sources: List[Dict[str, Any]] = Field(default_factory=list)
 
     @field_validator("reason")
     @classmethod
@@ -131,3 +137,11 @@ class EvidenceItem(BaseModel):
         le=1.0,
         description="Reliability / relevance score between 0.0 and 1.0"
     )
+
+    def to_source_dict(self) -> Dict[str, Any]:
+        """Convert to a source dict for the multi-source output."""
+        return {
+            "url": self.source_url,
+            "title": self.title,
+            "snippet": self.snippet,
+        }

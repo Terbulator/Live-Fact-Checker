@@ -715,3 +715,93 @@ def test_engine_never_hard_codes_a_credential() -> None:
     assert engine.api_key == GATEWAY_KEY
     unconfigured = LLMClaimEngine(REAL_SETTINGS_NO_KEY)
     assert unconfigured.api_key in (None, "")
+
+
+# ---------------------------------------------------------------------------
+# 11. Diagnostic logging for production failure mode visibility
+# ---------------------------------------------------------------------------
+
+
+def _has_trace(records, trace_name: str) -> bool:
+    """Check if any log record carries the given trace label in extra."""
+    for record in records:
+        if getattr(record, "trace", None) == trace_name:
+            return True
+    return False
+
+
+async def test_zero_claims_from_llm_emits_trace(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """LLM returning empty claims array emits CLAIM_EXTRACTION_ZERO_CLAIMS trace."""
+    import logging
+    caplog.set_level(logging.INFO, logger="live_fact_checker.trace")
+
+    _stub_gateway(monkeypatch, '{"claims": []}')
+    engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
+    claims = await engine.extract_claims(_transcript("s_zero", "Some text.", 1.0))
+
+    assert claims == []
+    assert _has_trace(caplog.records, "CLAIM_EXTRACTION_ZERO_CLAIMS")
+
+
+async def test_empty_claims_object_emits_invalid_response_trace(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """LLM returning non-list claims field emits CLAIM_EXTRACTION_INVALID_RESPONSE trace."""
+    import logging
+    caplog.set_level(logging.INFO, logger="live_fact_checker.trace")
+
+    _stub_gateway(monkeypatch, '{"claims": "not a list"}')
+    engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
+    claims = await engine.extract_claims(_transcript("s_invalid", "Some text.", 1.0))
+
+    assert claims == []
+    assert _has_trace(caplog.records, "CLAIM_EXTRACTION_INVALID_RESPONSE")
+
+
+async def test_non_dict_response_emits_invalid_response_trace(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """LLM returning non-dict/non-list emits CLAIM_EXTRACTION_INVALID_RESPONSE trace."""
+    import logging
+    caplog.set_level(logging.INFO, logger="live_fact_checker.trace")
+
+    _stub_gateway(monkeypatch, '"just a string"')
+    engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
+    claims = await engine.extract_claims(_transcript("s_invalid2", "Some text.", 1.0))
+
+    assert claims == []
+    assert _has_trace(caplog.records, "CLAIM_EXTRACTION_INVALID_RESPONSE")
+
+
+async def test_extraction_started_and_succeeded_traces_emitted(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """CLAIM_EXTRACTION_STARTED and CLAIM_EXTRACTION_SUCCEEDED traces emitted on success."""
+    import logging
+    caplog.set_level(logging.INFO, logger="live_fact_checker.trace")
+
+    _stub_gateway(monkeypatch, _claims_json(("A valid claim.", "date")))
+    engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
+    await engine.extract_claims(_transcript("s_trace", "Some text.", 1.0))
+
+    traces = {getattr(record, "trace", None) for record in caplog.records}
+    assert "CLAIM_EXTRACTION_STARTED" in traces
+    assert "CLAIM_EXTRACTION_SUCCEEDED" in traces
+
+
+async def test_duplicate_transcript_emits_duplicate_trace(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Duplicate transcript emits TRANSCRIPT_DUPLICATE trace."""
+    import logging
+    caplog.set_level(logging.INFO, logger="live_fact_checker.trace")
+
+    _stub_gateway(monkeypatch, _claims_json(("Water boils at 100 C.", "scientific_fact")))
+    engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
+
+    await engine.extract_claims(_transcript("s_dup_trace", "First utterance.", 1.0))
+    await engine.extract_claims(_transcript("s_dup_trace", "First utterance.", 2.0))
+
+    assert _has_trace(caplog.records, "TRANSCRIPT_DUPLICATE")

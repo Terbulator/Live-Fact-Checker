@@ -95,6 +95,45 @@ def to_internal_claim_payload(claim: ClaimEvent) -> Dict:
     }
 
 
+def to_wire_sources(sources: Any) -> List[Dict[str, Any]]:
+    """Normalise the internal ``sources`` list onto the backend wire shape.
+
+    The bridge is the only place that knows the two representations differ, so
+    an engine that does not produce the field at all, or produces it as
+    ``None``, still yields ``[]`` rather than failing the whole verification.
+    Only entries carrying a non-empty string ``url`` survive: a source that
+    cannot be linked is not something to put in front of a user.
+    """
+    if not sources or not isinstance(sources, (list, tuple)):
+        return []
+
+    wire_sources: List[Dict[str, Any]] = []
+    seen: set = set()
+    for entry in sources:
+        if not isinstance(entry, dict):
+            continue
+        url = entry.get("url")
+        if not isinstance(url, str) or not url.strip():
+            continue
+        normalised = url.strip()
+        if normalised in seen:
+            continue
+        seen.add(normalised)
+
+        title = entry.get("title")
+        snippet = entry.get("snippet")
+        wire_sources.append(
+            {
+                "url": normalised,
+                "title": title.strip() if isinstance(title, str) and title.strip() else None,
+                "snippet": snippet.strip()
+                if isinstance(snippet, str) and snippet.strip()
+                else None,
+            }
+        )
+    return wire_sources
+
+
 class VerificationEngine(ABC):
     """Interface between the backend and the verification module."""
 
@@ -159,7 +198,10 @@ class VerificationServiceEngine(VerificationEngine):
             timestamp=claim.timestamp,
             verdict=to_wire_verdict(internal.verdict),
             reason=internal.reason,
+            # `source` is still authoritative for existing consumers; `sources`
+            # is the additive, backward-compatible extension.
             source=internal.source,
+            sources=to_wire_sources(getattr(internal, "sources", None)),
         )
 
 

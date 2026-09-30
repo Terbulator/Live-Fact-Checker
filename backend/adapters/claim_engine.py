@@ -17,6 +17,15 @@ from typing import List, Optional, Sequence, Dict, Any
 import httpx
 
 from backend.config import get_settings
+from backend.logging_config import (
+    CLAIM_EXTRACTION_INVALID_RESPONSE,
+    CLAIM_EXTRACTION_STARTED,
+    CLAIM_EXTRACTION_SUCCEEDED,
+    CLAIM_EXTRACTION_ZERO_CLAIMS,
+    TRANSCRIPT_DUPLICATE,
+    get_logger,
+    log_trace,
+)
 from backend.schemas import ClaimEvent, TranscriptEvent
 
 logger = logging.getLogger(__name__)
@@ -299,8 +308,18 @@ class LLMClaimEngine(ClaimEngine):
         elif isinstance(data, dict):
             claims = data.get("claims")
             if not isinstance(claims, list):
+                log_trace(
+                    CLAIM_EXTRACTION_INVALID_RESPONSE,
+                    reason="claims_field_not_a_list",
+                    responseKeys=list(data.keys()),
+                )
                 return []
         else:
+            log_trace(
+                CLAIM_EXTRACTION_INVALID_RESPONSE,
+                reason="response_not_dict_or_list",
+                responseType=type(data).__name__,
+            )
             return []
 
         validated = []
@@ -351,6 +370,12 @@ class LLMClaimEngine(ClaimEngine):
         # Debug: a non-empty LLM payload that yields zero claims is a contract
         # mismatch we want visibility into. Never log the API key or full response.
         if claims and not validated:
+            log_trace(
+                CLAIM_EXTRACTION_INVALID_RESPONSE,
+                reason="all_items_failed_validation",
+                rawClaimCount=len(claims),
+                firstItemKeys=list(claims[0].keys()) if claims and isinstance(claims[0], dict) else "N/A",
+            )
             logger.debug(
                 "LLM Gateway response had %d claim object(s) but none passed "
                 "validation (missing 'claim'/'text'/'statement' or all were "
@@ -384,6 +409,11 @@ class LLMClaimEngine(ClaimEngine):
                     "already sent to the LLM Gateway.",
                     session_id,
                 )
+                log_trace(
+                    TRANSCRIPT_DUPLICATE,
+                    sessionId=session_id,
+                    normalizedKey=key,
+                )
                 return []
 
             # Reserved before awaiting the gateway so a concurrent duplicate
@@ -391,13 +421,30 @@ class LLMClaimEngine(ClaimEngine):
             processed.add(key)
             self._record_segment(session_id, key)
             try:
+                log_trace(
+                    CLAIM_EXTRACTION_STARTED,
+                    sessionId=session_id,
+                    textLength=len(text),
+                )
                 raw_claims = await self._extract_raw_claims(text)
+                log_trace(
+                    CLAIM_EXTRACTION_SUCCEEDED,
+                    sessionId=session_id,
+                    rawClaimCount=len(raw_claims),
+                )
             except BaseException:
                 # A segment that never produced claims is not "processed". Drop
                 # the reservation so a genuine retry is not suppressed forever.
                 processed.discard(key)
                 self._forget_segment(session_id, key)
                 raise
+
+        if not raw_claims:
+            log_trace(
+                CLAIM_EXTRACTION_ZERO_CLAIMS,
+                sessionId=session_id,
+                textLength=len(text),
+            )
 
         claim_events = []
         session_claims = self._get_session_claims(session_id)

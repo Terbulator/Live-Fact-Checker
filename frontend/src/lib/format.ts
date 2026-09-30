@@ -5,7 +5,7 @@
  * identical everywhere it appears.
  */
 
-import type { Verdict } from '../types/events'
+import type { EvidenceSource, VerificationEvent, Verdict } from '../types/events'
 
 /** Format an audio offset in seconds as a debate-style clock, e.g. `1:23.4`. */
 export function formatClock(seconds: number): string {
@@ -61,6 +61,56 @@ export function isLinkableSource(source: string): boolean {
   } catch {
     return false
   }
+}
+
+/** One row of the evidence area on a claim card. */
+export interface DisplaySource {
+  url: string
+  title: string | null
+  snippet: string | null
+  /** True for the citation in `VerificationEvent.source`. */
+  primary: boolean
+}
+
+/**
+ * Normalise the `sources` field into rows to render.
+ *
+ * The primary `source` string is always the first row, so a claim verified
+ * against a backend that sends no `sources` field still renders exactly as it
+ * did before. Anything the backend did not already put in `source` follows it,
+ * de-duplicated by URL, and each entry carries its own title and snippet.
+ *
+ * Entries without a usable string URL are skipped rather than rendered as dead
+ * text: a citation that cannot be opened or checked is not evidence.
+ */
+export function collectSources(verification: VerificationEvent): DisplaySource[] {
+  const rows: DisplaySource[] = []
+  const seen = new Set<string>()
+
+  const push = (url: unknown, title: unknown, snippet: unknown, primary: boolean) => {
+    if (typeof url !== 'string') return
+    const trimmed = url.trim()
+    if (trimmed === '' || seen.has(trimmed)) return
+    seen.add(trimmed)
+    rows.push({
+      url: trimmed,
+      title: typeof title === 'string' && title.trim() !== '' ? title.trim() : null,
+      snippet: typeof snippet === 'string' && snippet.trim() !== '' ? snippet.trim() : null,
+      primary,
+    })
+  }
+
+  push(verification.source, null, null, true)
+
+  const extras: EvidenceSource[] | undefined = verification.sources
+  if (Array.isArray(extras)) {
+    for (const entry of extras) {
+      if (entry === null || typeof entry !== 'object') continue
+      push(entry.url, entry.title, entry.snippet, false)
+    }
+  }
+
+  return rows
 }
 
 /** Counters summarising the verdicts resolved so far. */
