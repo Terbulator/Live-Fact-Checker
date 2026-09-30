@@ -3,6 +3,7 @@
  */
 
 import { AssemblyAIClient, postTranscriptToBackend } from './assemblyai';
+import { BACKEND_URL } from './config';
 import { vi } from 'vitest';
 
 // Store sent messages globally for testing
@@ -340,8 +341,12 @@ describe('postTranscriptToBackend', () => {
     });
 
     expect(result.ok).toBe(true);
+    expect(result.staleSession).toBe(false);
+    // Derived from the shared config rather than hardcoded: the base URL is
+    // supplied by VITE_BACKEND_URL and differs between a developer's machine
+    // and CI, so a literal here would pass or fail on environment alone.
     expect(mockFetch).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/events/transcript',
+      `${BACKEND_URL}/events/transcript`,
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

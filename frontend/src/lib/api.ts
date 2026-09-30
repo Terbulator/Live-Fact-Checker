@@ -11,7 +11,12 @@
  */
 
 import { BACKEND_URL } from './config'
-import type { HealthResponse, SessionState } from '../types/events'
+import type {
+  EvidenceSource,
+  HealthResponse,
+  SessionState,
+  Verdict,
+} from '../types/events'
 
 /** An HTTP failure carrying the backend's stable error code. */
 export class ApiError extends Error {
@@ -29,6 +34,60 @@ export class ApiError extends Error {
 // Re-export SessionState for consumers
 export type { SessionState }
 
+/**
+ * Outcome of checking one claim.
+ *
+ * Not a verdict. `verified` means a verdict was reached (and `UNVERIFIABLE` is
+ * one of them); `failed` means the check itself did not complete, so there is no
+ * verdict at all. The two are kept apart on purpose -- folding a retrieval
+ * failure into `UNVERIFIABLE` would turn a broken integration into a statistic
+ * about the video.
+ */
+export type ClaimCheckStatus = 'verified' | 'failed'
+
+/** One claim from an ingested video, with its verdict and the evidence behind it. */
+export interface VideoClaimResult {
+  claim_id: string
+  claim: string
+  speaker: string | null
+  /** Offset into the source video in seconds, so the moment can be located. */
+  timestamp: number
+  status: ClaimCheckStatus
+  verdict: Verdict | null
+  reason: string | null
+  /** Evidence-grounded explanation; null when nothing citable was retrieved. */
+  supporting_statement: string | null
+  source: string | null
+  sources: EvidenceSource[]
+  /** Provider relevance score, or null when the provider reported none. */
+  confidence: number | null
+  from_cache: boolean
+  /** Set only when `status` is `failed`, explaining the absent verdict. */
+  error: string | null
+}
+
+/**
+ * The deterministic summary of one video run.
+ *
+ * Every `*_ratio` is `null` when its denominator is zero. `null` means "not
+ * measured" and must be rendered as such; substituting 0% would assert that
+ * nothing was true, which is a finding this system did not produce.
+ */
+export interface VideoScorecard {
+  total_claims: number
+  checked_claims: number
+  failed_claims: number
+  true_claims: number
+  false_claims: number
+  ambiguous_claims: number
+  unverifiable_claims: number
+  true_ratio: number | null
+  false_ratio: number | null
+  ambiguous_ratio: number | null
+  unverifiable_ratio: number | null
+  coverage_ratio: number | null
+}
+
 /** Response from ingestion endpoints. */
 export interface IngestionResponse {
   source_id: string
@@ -44,6 +103,11 @@ export interface IngestionResponse {
   }>
   claims_extracted: number
   verifications_completed: number
+  /** Per-claim results, with evidence. Absent on an older backend. */
+  claims?: VideoClaimResult[]
+  /** Summary derived from `claims`. Absent on an older backend. */
+  scorecard?: VideoScorecard | null
+  duration_seconds?: number | null
 }
 
 /** Unwrap `{"detail": {"code": ..., "message": ...}}` from an error body. */

@@ -5,6 +5,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 import { useVoiceSession } from './useVoiceSession';
+import { BACKEND_URL } from '../lib/config';
 
 // Mock fetch globally
 const mockFetch = vi.fn();
@@ -28,8 +29,14 @@ vi.mock('../lib/assemblyai', () => {
 
   return {
     AssemblyAIClient: MockAssemblyAIClient,
-    postTranscriptToBackend: vi.fn().mockResolvedValue(true),
-    BACKEND_URL: 'http://127.0.0.1:8000',
+    // Mirrors the real return contract. Returning a bare boolean left the hook
+    // reading `.staleSession` off `true`, which is undefined rather than false
+    // and would silently skip the stale-session path under test.
+    postTranscriptToBackend: vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      staleSession: false,
+    }),
   };
 });
 
@@ -59,7 +66,7 @@ describe('useVoiceSession', () => {
       await result.current.start();
     });
 
-    expect(mockFetch).toHaveBeenCalledWith('http://127.0.0.1:8000/assemblyai/token', {
+    expect(mockFetch).toHaveBeenCalledWith(`${BACKEND_URL}/assemblyai/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });

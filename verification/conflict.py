@@ -171,7 +171,9 @@ class EvidenceStance:
             means this snippet neither confirms nor contradicts; it is still
             citable, it just does not vote.
         source_url: The item's URL, carried through for the report.
-        confidence: The item's confidence, carried through for the report.
+        confidence: The item's provider score, or ``None`` when the provider
+            supplied none. Carried through unchanged so the report never shows
+            a relevance number the provider did not return.
         snippet: A short excerpt used to explain the conflict to a reader.
         origin: ``"annotated"`` when the retriever supplied a stance,
             ``"derived"`` when it was inferred from the text, ``"manual"``
@@ -180,7 +182,7 @@ class EvidenceStance:
 
     stance: str
     source_url: str
-    confidence: float
+    confidence: Optional[float]
     snippet: str
     origin: str = "derived"
 
@@ -232,9 +234,32 @@ def _content_words(text: str) -> set:
 
 def _excerpt(snippet: str, limit: int = 160) -> str:
     collapsed = " ".join((snippet or "").split())
-    if len(collapsed) <= limit:
-        return collapsed
-    return collapsed[:limit].rsplit(" ", 1)[0] + "…"
+    if len(collapsed) > limit:
+        return collapsed[:limit].rsplit(" ", 1)[0] + "…"
+    return collapsed
+
+
+def _best_provider_score(items: Sequence[EvidenceStance]) -> Optional[float]:
+    """Highest provider score among ``items``, or ``None`` if none has one.
+
+    ``None`` means "unmeasured", not "zero" and not "average". Callers must
+    treat it as a reason to decline to compare, never as a number.
+    """
+    scores = [item.confidence for item in items if item.confidence is not None]
+    return max(scores) if scores else None
+
+
+def _representative(items: Sequence[EvidenceStance]) -> EvidenceStance:
+    """Pick the snippet to quote from one side of a conflict.
+
+    The best provider-scored item when the provider scored any of them, and
+    otherwise the first in provider order. This is a choice of what to *quote*,
+    not a claim about which side is more reliable.
+    """
+    for item in items:
+        if item.confidence is not None:
+            return item
+    return items[0]
 
 
 def _has_refutation_wording(snippet: str) -> bool:
@@ -355,14 +380,21 @@ class ConflictDetector:
     # -- conflict decision ------------------------------------------------
 
     def usable(self, evidence: Optional[Sequence[EvidenceItem]]) -> List[EvidenceItem]:
-        """Return the evidence credible enough to vote on a conflict."""
+        """Return the evidence credible enough to vote on a conflict.
+
+        Mirrors :meth:`VerificationChecker.verify`: a result the provider
+        scored below the threshold is too weak to create a conflict, and a
+        result the provider did not score at all is still counted, because
+        inventing a score for it in either direction would decide the outcome
+        on a number nobody supplied.
+        """
         if not evidence:
             return []
         return [
             item
             for item in evidence
             if isinstance(item, EvidenceItem)
-            and item.confidence >= self.min_confidence
+            and (item.confidence is None or item.confidence >= self.min_confidence)
             and item.snippet
             and item.snippet.strip()
         ]
@@ -435,11 +467,20 @@ class ConflictDetector:
                 refuting=tuple(refuting),
             )
 
-        best_support = max(item.confidence for item in supporting)
-        best_refute = max(item.confidence for item in refuting)
-        gap = abs(best_support - best_refute)
+        # A conflict is only "resolved" when both sides carry a real provider
+        # score and one is decisively better. If either side has no score at
+        # all there is nothing to measure the gap with, and inventing a number
+        # to compute one would be deciding the verdict on a value no provider
+        # supplied, so the conflict is reported instead.
+        best_support = _best_provider_score(supporting)
+        best_refute = _best_provider_score(refuting)
+        gap = (
+            None
+            if best_support is None or best_refute is None
+            else abs(best_support - best_refute)
+        )
 
-        if gap > self.max_confidence_gap:
+        if gap is not None and gap > self.max_confidence_gap:
             # Resolved: one side is decisively better evidenced, so this is not
             # a standoff and the base checker's verdict stands.
             if best_support > best_refute:
@@ -450,7 +491,7 @@ class ConflictDetector:
                 has_conflict=False,
                 resolved=True,
                 explanation=(
-                    f"Disagreeing sources differ in credibility by {gap:.2f}, so "
+                    f"Disagreeing sources differ in provider relevance by {gap:.2f}, so "
                     "the better-evidenced account resolves the disagreement."
                 ),
                 considered=len(usable),
@@ -482,9 +523,14 @@ class ConflictDetector:
     def _explanation(
         supporting: Sequence[EvidenceStance], refuting: Sequence[EvidenceStance]
     ) -> str:
-        """Build a reason a reader can act on, naming both sides."""
-        support = max(supporting, key=lambda item: item.confidence)
-        refute = max(refuting, key=lambda item: item.confidence)
+        """Build a reason a reader can act on, naming both sides.
+
+        The quoted snippet on each side is the best provider-scored one, or the
+        first the provider returned when it scored none. Either way it is a real
+        retrieved snippet, never a rewritten or invented one.
+        """
+        support = _representative(supporting)
+        refute = _representative(refuting)
         return (
             "Credible sources disagree on this claim and neither is clearly "
             f"better evidenced. One reports: “{support.snippet}” Another "

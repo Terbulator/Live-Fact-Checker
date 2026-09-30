@@ -11,7 +11,14 @@
  */
 
 import { useCallback, useRef, useState } from 'react'
-import { ingestAudio, ingestVideo, ingestVideoUrl, ApiError } from '../lib/api'
+import {
+  ingestAudio,
+  ingestVideo,
+  ingestVideoUrl,
+  ApiError,
+  type IngestionResponse,
+} from '../lib/api'
+import { completionMessage } from '../lib/videoReport'
 
 export interface IngestionControlsProps {
   /** Current session ID from useSession */
@@ -20,8 +27,15 @@ export interface IngestionControlsProps {
   isActive: boolean
   /** Callback when ingestion starts (to show loading state) */
   onIngestionStart?: () => void
-  /** Callback when ingestion completes */
-  onIngestionComplete?: (result: { claims: number; verifications: number }) => void
+  /**
+   * Callback when ingestion completes, carrying the full backend result.
+   *
+   * The whole response is passed rather than just the counts, because the
+   * per-claim evidence and the scorecard are exactly what the caller needs to
+   * render the report. A caller that only wants counts can read them off the
+   * same object.
+   */
+  onIngestionComplete?: (result: IngestionResponse) => void
   /** Callback for errors */
   onError?: (error: string) => void
 }
@@ -54,6 +68,8 @@ export function IngestionControls({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const urlInputRef = useRef<HTMLInputElement>(null)
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  /** Which button opened the file dialog, read back when a file arrives. */
+  const pendingModeRef = useRef<'audio' | 'video'>('audio')
 
   const resetState = useCallback(() => {
     setState({
@@ -117,7 +133,7 @@ export function IngestionControls({
           }))
         }, 200)
 
-        let result
+        let result: IngestionResponse
         if (mode === 'audio') {
           result = await ingestAudio(sessionId, file)
         } else {
@@ -137,9 +153,9 @@ export function IngestionControls({
           ...s,
           status: 'complete',
           progress: 100,
-          message: `Complete! Found ${result.claims_extracted} claims, verified ${result.verifications_completed}.`,
+          message: completionMessage(result),
         }))
-        onIngestionComplete?.({ claims: result.claims_extracted, verifications: result.verifications_completed })
+        onIngestionComplete?.(result)
       } catch (error) {
         if (progressIntervalRef.current) {
           clearInterval(progressIntervalRef.current)
@@ -218,9 +234,9 @@ export function IngestionControls({
           ...s,
           status: 'complete',
           progress: 100,
-          message: `Complete! Found ${result.claims_extracted} claims, verified ${result.verifications_completed}.`,
+          message: completionMessage(result),
         }))
-        onIngestionComplete?.({ claims: result.claims_extracted, verifications: result.verifications_completed })
+        onIngestionComplete?.(result)
       } catch (error) {
         if (progressIntervalRef.current) {
           clearInterval(progressIntervalRef.current)
@@ -241,18 +257,24 @@ export function IngestionControls({
   )
 
   const handleAudioClick = useCallback(() => {
+    // Recorded before the dialog opens. `state.mode` cannot do this job: it is
+    // only set once a file has been chosen, so the change handler used to read
+    // `null` and treat every selection -- including an .mp3 -- as a video,
+    // rejecting it as an unsupported video format.
+    pendingModeRef.current = 'audio'
     fileInputRef.current?.click()
   }, [])
 
   const handleVideoClick = useCallback(() => {
+    pendingModeRef.current = 'video'
     fileInputRef.current?.click()
   }, [])
 
   const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>, mode: 'audio' | 'video') => {
+    (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]
       if (file) {
-        handleFileSelect(mode, file)
+        handleFileSelect(pendingModeRef.current, file)
         // Reset input so same file can be selected again
         e.target.value = ''
       }
@@ -319,7 +341,7 @@ export function IngestionControls({
         ref={fileInputRef}
         type="file"
         style={{ display: 'none' }}
-        onChange={(e) => handleFileChange(e, state.mode === 'audio' ? 'audio' : 'video')}
+        onChange={handleFileChange}
         accept="audio/*,video/*"
       />
 

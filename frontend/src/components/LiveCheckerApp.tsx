@@ -22,15 +22,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { ClaimPanel } from './ClaimPanel'
 import { ErrorPanel } from './ErrorPanel'
+import { IngestionControls } from './IngestionControls'
 import { PipelineFlow } from './PipelineFlow'
 import { SessionControls } from './SessionControls'
 import { StatusBar } from './StatusBar'
 import { TranscriptPanel } from './TranscriptPanel'
 import { VerdictScoreboard } from './VerdictScoreboard'
+import { VideoClaimList } from './VideoClaimList'
+import { VideoScorecard } from './VideoScorecard'
 import { useNow } from '../hooks/useNow'
 import { useSession } from '../hooks/useSession'
 import { useVoiceSession } from '../hooks/useVoiceSession'
 import { BACKEND_URL } from '../lib/config'
+import type { IngestionResponse } from '../lib/api'
 
 export default function LiveCheckerApp() {
   const {
@@ -60,6 +64,12 @@ export default function LiveCheckerApp() {
 
   const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null)
   const [isDemo, setIsDemo] = useState(false)
+  /**
+   * The most recent recorded-media run, rendered as a report below the live
+   * controls. Held here rather than inside `IngestionControls` so the controls
+   * stay a set of inputs and the report survives a progress-bar dismissal.
+   */
+  const [ingestion, setIngestion] = useState<IngestionResponse | null>(null)
 
   // Start voice session when backend session becomes active (for Go Live)
   useEffect(() => {
@@ -93,6 +103,9 @@ export default function LiveCheckerApp() {
     (options?: { demo?: boolean }) => {
       setSelectedClaimId(null)
       setIsDemo(options?.demo === true)
+      // A new session must not inherit the previous run's report; its claims
+      // belong to media that is no longer on screen.
+      setIngestion(null)
       void start(options)
     },
     [start],
@@ -128,6 +141,24 @@ export default function LiveCheckerApp() {
           onStop={handleStop}
           onReconnect={reconnect}
         />
+
+        <IngestionControls
+          sessionId={session?.sessionId ?? null}
+          isActive={phase === 'active'}
+          onIngestionComplete={setIngestion}
+        />
+
+        {ingestion !== null && (
+          <div className="app__report">
+            {ingestion.scorecard != null && (
+              <VideoScorecard
+                scorecard={ingestion.scorecard}
+                durationSeconds={ingestion.duration_seconds}
+              />
+            )}
+            <VideoClaimList results={ingestion.claims ?? []} />
+          </div>
+        )}
 
         <ErrorPanel
           fault={fault ?? voiceError}

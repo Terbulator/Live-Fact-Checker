@@ -63,6 +63,29 @@ export function isLinkableSource(source: string): boolean {
   }
 }
 
+/**
+ * Render a provider relevance score, or state that none was reported.
+ *
+ * `confidence` is the search provider's own score for the lead source. It is
+ * `null` whenever the provider supplied none, and this function's only options
+ * are to show that number or to say so. Substituting a default here -- 1.0 for
+ * "looks confident", 0.5 for "no idea" -- would publish a number no provider
+ * ever returned, which is exactly what this project must never do.
+ *
+ * A reported score is shown verbatim: no rounding, no padding, no rescaling.
+ * Rounding would be a small lie in both directions -- `0.999` displayed as
+ * `1.00` reads as perfect confidence from a provider that never claimed it.
+ */
+export function formatConfidence(confidence: number | null | undefined): string {
+  if (!hasConfidence(confidence)) return 'N/A'
+  return String(confidence)
+}
+
+/** Whether a confidence score was actually reported, as opposed to absent. */
+export function hasConfidence(confidence: number | null | undefined): boolean {
+  return typeof confidence === 'number' && Number.isFinite(confidence)
+}
+
 /** One row of the evidence area on a claim card. */
 export interface DisplaySource {
   url: string
@@ -73,7 +96,7 @@ export interface DisplaySource {
 }
 
 /**
- * Normalise the `sources` field into rows to render.
+ * Normalise a primary `source` plus a `sources` list into rows to render.
  *
  * The primary `source` string is always the first row, so a claim verified
  * against a backend that sends no `sources` field still renders exactly as it
@@ -82,8 +105,15 @@ export interface DisplaySource {
  *
  * Entries without a usable string URL are skipped rather than rendered as dead
  * text: a citation that cannot be opened or checked is not evidence.
+ *
+ * Takes the two fields separately rather than a whole event so the ingestion
+ * report, whose results use a different field naming, can reuse this instead of
+ * fabricating a wire event to pass in.
  */
-export function collectSources(verification: VerificationEvent): DisplaySource[] {
+export function collectSourceRows(
+  source: string | null | undefined,
+  sources: EvidenceSource[] | undefined,
+): DisplaySource[] {
   const rows: DisplaySource[] = []
   const seen = new Set<string>()
 
@@ -100,17 +130,25 @@ export function collectSources(verification: VerificationEvent): DisplaySource[]
     })
   }
 
-  push(verification.source, null, null, true)
+  push(source, null, null, true)
 
-  const extras: EvidenceSource[] | undefined = verification.sources
-  if (Array.isArray(extras)) {
-    for (const entry of extras) {
+  if (Array.isArray(sources)) {
+    for (const entry of sources) {
       if (entry === null || typeof entry !== 'object') continue
       push(entry.url, entry.title, entry.snippet, false)
     }
   }
 
   return rows
+}
+
+/**
+ * Collect the evidence rows for a verification event.
+ *
+ * A thin wrapper over {@link collectSourceRows} for the live claim cards.
+ */
+export function collectSources(verification: VerificationEvent): DisplaySource[] {
+  return collectSourceRows(verification.source, verification.sources)
 }
 
 /** Counters summarising the verdicts resolved so far. */

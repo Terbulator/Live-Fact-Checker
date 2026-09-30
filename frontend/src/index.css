@@ -1369,6 +1369,44 @@ button {
   overflow-wrap: anywhere;
 }
 
+/* The evidence-grounded statement: the part a reader can trace to a source.
+   Sits directly under the reason and above the source list, so the order on
+   screen is verdict -> explanation -> the evidence it came from. */
+.card__statement,
+.scoreboard__heroStatement {
+  margin: 0.45rem 0 0;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* Provider relevance for the lead source, or "N/A" when the search provider
+   reported no score. Never a substitute value. */
+.card__confidence {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  margin: 0.5rem 0 0;
+  color: var(--text-faint);
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.card__confidenceLabel {
+  font-weight: 660;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.card__confidence--absent {
+  font-style: italic;
+  text-transform: none;
+}
+
 .card__source {
   display: flex;
   gap: 0.5rem;
@@ -1718,4 +1756,405 @@ button {
   align-items: center;
   color: var(--supported);
   font-size: 0.78rem;
+}
+
+/* ------------------------------------------------------- video fact-check report */
+
+/* The report sits under the live controls and spans the same width as the
+   columns below, so a recorded run reads as its own section rather than as part
+   of the live stream. */
+.app__report {
+  display: grid;
+  grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 1080px) {
+  .app__report {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------------------------------------------------------------- vscore */
+
+.vscore {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.1rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+
+.vscore__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.vscore__title {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 0.68rem;
+  font-weight: 680;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.vscore__source {
+  color: var(--text-faint);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.vscore__duration {
+  font-family: var(--font-mono);
+}
+
+/* Coverage is stated in words before it is shown as a bar. A run where nothing
+   could be checked has no share at all, and the sentence is what makes that
+   legible instead of an empty bar. */
+.vscore__coverage {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.vscore__coverageBar {
+  height: 6px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.vscore__coverageFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--supported));
+  border-radius: 999px;
+}
+
+.vscore__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+}
+
+.vscore__row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0.35rem 0.45rem;
+  border-left: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.vscore__rowLabel {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  font-weight: 660;
+  text-transform: uppercase;
+}
+
+/* The parenthetical is what stops a reader summing "not checked" into the
+   distribution and reading a finding the backend never produced. */
+.vscore__rowNote {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.vscore__rowValue {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin: 0;
+}
+
+.vscore__rowCount {
+  min-width: 1.6rem;
+  text-align: right;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.vscore__rowShare {
+  min-width: 2.6rem;
+  text-align: right;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A failed check is not a verdict, so it is set apart from the four that are. */
+.vscore__row--failure {
+  border-left-color: var(--border-strong);
+  background: var(--bg-sunken);
+}
+
+.vscore__row--failure .vscore__rowLabel,
+.vscore__row--failure .vscore__rowCount {
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------- vclaims */
+
+.vclaims {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1rem 1.1rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+
+.vclaims__title {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 0.68rem;
+  font-weight: 680;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.vclaims__count {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0;
+}
+
+.vclaims__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 30rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.vclaim {
+  --tone: var(--checking);
+  --tone-soft: var(--checking-soft);
+
+  padding: 0.7rem 0.85rem;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--tone);
+  border-radius: var(--radius-sm);
+}
+
+.vclaim--supported {
+  --tone: var(--supported);
+  --tone-soft: var(--supported-soft);
+}
+
+.vclaim--refuted {
+  --tone: var(--refuted);
+  --tone-soft: var(--refuted-soft);
+}
+
+.vclaim--unknown {
+  --tone: var(--unknown);
+  --tone-soft: var(--unknown-soft);
+}
+
+/* Deliberately not a verdict tone. A claim that was never checked wears the
+   neutral border rather than the "unverifiable" colour, so it cannot be read at
+   a glance as a finding. */
+.vclaim--unchecked {
+  --tone: var(--border-strong);
+  --tone-soft: rgba(255, 255, 255, 0.015);
+}
+
+.vclaim__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.vclaim__speaker {
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 640;
+}
+
+.vclaim__clock {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.vclaim__text {
+  margin: 0.4rem 0 0;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 560;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.vclaim__result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  background: var(--tone-soft);
+}
+
+.vclaim__reason {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* Set as a quote because it quotes a source. Indented rather than italicised so
+   it stays legible at projector contrast. */
+.vclaim__statement {
+  margin: 0.35rem 0 0;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--border);
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.vclaim__confidence {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  margin: 0.4rem 0 0;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+}
+
+.vclaim__confidenceLabel {
+  color: var(--text-faint);
+  font-size: 0.6rem;
+  font-weight: 660;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* An unreported score is shown as absent, never substituted. */
+.vclaim__confidence--absent {
+  color: var(--text-faint);
+}
+
+.vclaim__cache {
+  margin: 0.35rem 0 0;
+  color: var(--text-faint);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.vclaim__sources {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vclaim__sourceItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.vclaim__source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.vclaim__sourceLabel {
+  min-width: 3.4rem;
+  color: var(--text-faint);
+  font-size: 0.6rem;
+  font-weight: 660;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.vclaim__link {
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.vclaim__sourceText {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.vclaim__snippet {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* Says what did not happen, in its own words. Never styled like a verdict. */
+.vclaim__failure {
+  margin: 0.5rem 0 0;
+  padding: 0.4rem 0.55rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+/* The outcome is already conveyed by the badge, the tone and the failure note;
+   this restates it for assistive technology, which reads the visual tone as
+   nothing at all. */
+.vclaim__srStatus {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

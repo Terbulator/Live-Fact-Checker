@@ -80,6 +80,29 @@ async def validate_audio_file(filename: str, content_type: str, file_size: int) 
             )
 
 
+def _provider_confidence(value: Any) -> Optional[float]:
+    """Return AssemblyAI's own confidence, or ``None`` when it gave none.
+
+    AssemblyAI's own no-speech threshold already treats a returned confidence
+    below ~0.5 as silence, so anything genuinely present is trustworthy. What
+    is not acceptable is manufacturing a value: this used to answer ``1.0`` for
+    a missing score, which told a reader the words were transcribed with
+    perfect certainty when the provider had said nothing at all. An unusable or
+    absent score is now ``None``, which the wire contract and the UI both render
+    as "not reported".
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if not isinstance(value, (int, float)):
+        return None
+    score = float(value)
+    if score != score or score in (float("inf"), float("-inf")):  # NaN / infinity
+        return None
+    if not 0.0 <= score <= 1.0:
+        return None
+    return score
+
+
 async def transcribe_audio_file(file_path: str, api_key: str) -> Dict[str, Any]:
     """Transcribe audio file using AssemblyAI.
 
@@ -119,16 +142,18 @@ async def transcribe_audio_file(file_path: str, api_key: str) -> Dict[str, Any]:
                 "text": utterance.text,
                 "start": utterance.start / 1000.0,  # Convert ms to seconds
                 "end": utterance.end / 1000.0,
-                "confidence": utterance.confidence,
+                "confidence": _provider_confidence(utterance.confidence),
             })
     else:
-        # Fallback: single segment
+        # Fallback: one segment for the whole file. The transcript-level
+        # confidence is passed through exactly as AssemblyAI reported it, and is
+        # None when it reported none.
         segments.append({
             "speaker": "Speaker 1",
             "text": transcript.text,
             "start": 0.0,
             "end": 0.0,
-            "confidence": transcript.confidence if transcript.confidence else 1.0,
+            "confidence": _provider_confidence(transcript.confidence),
         })
 
     return {

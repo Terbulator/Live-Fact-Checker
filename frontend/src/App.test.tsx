@@ -49,6 +49,17 @@ describe('App routes', () => {
     expect(screen.getByRole('button', { name: /^sign in$/i })).toBeDisabled();
   });
 
+  it('does not claim signup works either', () => {
+    renderAt('/signup');
+    expect(screen.getByText(/accounts are not implemented/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^(create|sign up)/i })).toBeDisabled();
+  });
+
+  it('falls back to the landing page for an unknown path', () => {
+    renderAt('/no-such-page');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/know what's true/i);
+  });
+
   it('marks session history as coming soon rather than built', () => {
     renderAt('/dashboard');
     expect(screen.getAllByText('COMING SOON').length).toBeGreaterThan(0);

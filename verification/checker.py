@@ -10,7 +10,7 @@ Adheres strictly to the principle: if evidence is missing, weak, or conflicting,
 the verdict must be Unverifiable.
 """
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 import re
 
 from verification.models import EvidenceItem, VerdictType
@@ -72,7 +72,14 @@ def extract_numerical_tokens(text: str) -> set:
 class VerificationChecker:
     """Evaluates claims against retrieved evidence snippets."""
 
-    def __init__(self, min_confidence_threshold: float = 0.60):
+    def __init__(self, min_confidence_threshold: Optional[float] = 0.60):
+        """Configure how much evidential weight a source needs.
+
+        ``min_confidence_threshold`` is compared only against scores the
+        retrieval provider actually returned; it is never used to manufacture
+        one. A result with no provider score is always considered, and a result
+        the provider scored below the threshold is discarded as noise.
+        """
         self.min_confidence_threshold = min_confidence_threshold
 
     def verify(self, claim_text: str, evidence: List[EvidenceItem]) -> Tuple[VerdictType, str, str]:
@@ -89,10 +96,15 @@ class VerificationChecker:
                 "No source available",
             )
 
-        # Filter out empty snippets or extremely low-confidence noise
+        # Filter out empty snippets or noise the provider itself discredited.
+        # An unscored item (``confidence is None``) is deliberately kept: the
+        # provider returned it as a real result, and we have no measurement
+        # saying it is weak, so dropping it would discard evidence on the basis
+        # of a number we chose rather than one we were given.
         usable_evidence = [
             e for e in evidence
-            if e.confidence >= self.min_confidence_threshold and e.snippet and e.snippet.strip()
+            if (e.confidence is None or e.confidence >= self.min_confidence_threshold)
+            and e.snippet and e.snippet.strip()
         ]
         if not usable_evidence:
             return (

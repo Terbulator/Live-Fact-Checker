@@ -104,8 +104,23 @@ class VerificationEvent(BaseModel):
         description="Primary evidence URL or authoritative source reference"
     )
     # Backward-compatible extension: multiple evidence sources.
-    # Each entry: {"url": str, "title": str|None, "snippet": str|None}
+    # Each entry: {"url": str, "title": str|None, "snippet": str|None,
+    #              "confidence": float|None}
     sources: List[Dict[str, Any]] = Field(default_factory=list)
+    # The evidence-grounded explanation, distinct from `reason`.
+    #
+    # `reason` is the checker's one-line rationale and is what existing clients
+    # already render. `supportingStatement` is the part that can be traced back
+    # to the retrieved material: it quotes or points at the actual snippets the
+    # verdict was derived from, and it is None when there was nothing retrieved
+    # to explain. It is never generated from outside knowledge.
+    supportingStatement: Optional[str] = Field(
+        default=None,
+        description=(
+            "Explanation grounded only in the retrieved evidence. None when no "
+            "citable evidence was returned."
+        ),
+    )
 
     @field_validator("reason")
     @classmethod
@@ -131,11 +146,18 @@ class EvidenceItem(BaseModel):
         default=None,
         description="Stance indicator relative to the claim, if pre-tagged or evaluated"
     )
-    confidence: float = Field(
-        default=1.0,
+    confidence: Optional[float] = Field(
+        default=None,
         ge=0.0,
         le=1.0,
-        description="Reliability / relevance score between 0.0 and 1.0"
+        description=(
+            "The retrieval provider's own relevance score for this source, "
+            "between 0.0 and 1.0, or None when the provider supplied no "
+            "usable score. This value is never invented: there is no default, "
+            "no fallback and no fitted constant. A source the provider did not "
+            "score is still real evidence and is still evaluated, it simply "
+            "carries no confidence."
+        ),
     )
 
     # Wire shape lives in ``verification.sources.to_source_dict``. A second copy

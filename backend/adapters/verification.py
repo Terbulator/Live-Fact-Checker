@@ -173,6 +173,19 @@ def to_wire_sources(sources: Any) -> List[Dict[str, Any]]:
     return wire_sources
 
 
+def _wire_supporting_statement(value: Any) -> Optional[str]:
+    """Return the evidence-grounded statement, or ``None`` when there is none.
+
+    A blank or non-string value is treated as absent rather than coerced. The
+    backend must never manufacture an explanation to fill the field, so the only
+    two outcomes are the upstream text or nothing.
+    """
+    if isinstance(value, str):
+        trimmed = value.strip()
+        return trimmed or None
+    return None
+
+
 class VerificationEngine(ABC):
     """Interface between the backend and the verification module."""
 
@@ -246,6 +259,12 @@ class VerificationServiceEngine(VerificationEngine):
             # Read off the lead ranked source, never invented. None when the
             # provider scored nothing or no source was citable.
             confidence=verdict_confidence(wire_sources),
+            # Already assembled from the retrieved evidence upstream; taken as
+            # given rather than recomputed, and tolerated as absent so an
+            # engine that predates the field still verifies.
+            supportingStatement=_wire_supporting_statement(
+                getattr(internal, "supportingStatement", None)
+            ),
         )
 
 
@@ -265,8 +284,20 @@ class CachedVerificationEngine(VerificationEngine):
       run, so a hardcoded fact cannot enter the store.
     * On any store failure the lookup returns ``None`` and retrieval proceeds,
       so a database outage degrades to live verification instead of failing.
-    * The verdict, reason, source and confidence are replayed verbatim. Nothing
-      is synthesised: a miss simply performs the real retrieval.
+    * The verdict, reason, source, confidence, supporting statement and ranked
+      citations are replayed verbatim. Nothing is synthesised: a miss simply
+      performs the real retrieval, and a field the store cannot supply stays
+      absent rather than being filled in.
+
+    Replay is auditable
+    -------------------
+    A cached answer is replayed with the same evidence a live retrieval would
+    have produced. Without that, serving a claim from cache would strip its
+    supporting statement and citations, so the identical claim would appear
+    better evidenced the first time it was asked than the second -- which would
+    make cache behaviour look like a change in the underlying facts. The stored
+    fields are carried through untouched, and their provenance is marked with
+    ``fromCache``.
     """
 
     name = "cached-verification-engine"
@@ -307,6 +338,13 @@ class CachedVerificationEngine(VerificationEngine):
                 verdict=cached.verdict,
                 reason=cached.reason,
                 source=cached.source,
+                # Replayed, never recomputed. Taken straight from the store so a
+                # cached answer shows the same citations as the live retrieval
+                # that produced it.
+                sources=[dict(entry) for entry in cached.sources],
+                # Absent stays absent: the backend must not manufacture an
+                # explanation for a row that never stored one.
+                supportingStatement=cached.supporting_statement,
                 confidence=cached.confidence,
                 fromCache=True,
             )
@@ -319,6 +357,8 @@ class CachedVerificationEngine(VerificationEngine):
             reason=verification.reason,
             source=verification.source,
             confidence=verification.confidence,
+            supporting_statement=verification.supportingStatement,
+            sources=verification.sources,
             provider=self._provider_name,
             session_id=claim.sessionId,
         )

@@ -72,13 +72,16 @@ class Settings(BaseSettings):
 
     # --- Engine wiring ----------------------------------------------------
     use_mock_engines: bool = Field(
-        default=True,
+        default=False,
         description=(
-            "True selects the deterministic offline mock engines. False selects "
-            "the real modules: claim extraction runs through LLMClaimEngine "
-            "against the OpenAI-compatible LLM Gateway, while verification runs "
-            "through the existing `verification` package. This single switch is "
-            "all that is needed to move between mock and real mode."
+            "False (the default) selects the real modules: claim extraction "
+            "runs through LLMClaimEngine against the OpenAI-compatible LLM "
+            "Gateway, and verification through the existing `verification` "
+            "package against the live search provider.\n\n"
+            "True selects the deterministic offline mock engines. It is opt-in "
+            "so it can never be enabled silently: mock mode is a test and "
+            "offline-development affordance, never a production default. "
+            "Set it explicitly for offline work."
         ),
     )
 

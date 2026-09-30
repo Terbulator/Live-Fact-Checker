@@ -24,7 +24,8 @@ Nothing in ``verification/`` imports this module: that package stays standalone
 and runnable without a database.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import json
 from typing import Any, Dict, List, Optional, Protocol
 
 from backend.adapters.claim_engine import normalize_transcript
@@ -44,9 +45,54 @@ def normalize_claim_key(claim: str) -> str:
     return normalize_transcript(claim)
 
 
+def decode_sources(raw: Any) -> List[Dict[str, Any]]:
+    """Return a stored ``sources`` column as a list of citation dicts.
+
+    Accepts either the JSON text ``asyncpg`` hands back for a ``jsonb`` column or
+    an already-decoded list, and tolerates ``None``. Anything that is not a list
+    of objects yields ``[]``, so a malformed row degrades to "no extra citations"
+    rather than failing a verification. It never raises: the cache is an
+    optimisation, and a row it cannot read is a miss, not an outage.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, (str, bytes, bytearray)):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            return []
+    if not isinstance(raw, list):
+        return []
+    return [dict(entry) for entry in raw if isinstance(entry, dict)]
+
+
+def encode_sources(sources: Optional[List[Dict[str, Any]]]) -> str:
+    """Serialise a ``sources`` list for a ``jsonb`` column.
+
+    ``asyncpg`` is handed JSON text rather than a Python object, which is the
+    documented way to fill a ``jsonb`` parameter without installing a custom
+    codec. Anything unserialisable is stored as an empty list: losing the
+    citation list is recoverable, whereas a failed cache write would lose the
+    verdict with it.
+    """
+    if not sources:
+        return "[]"
+    try:
+        return json.dumps([dict(entry) for entry in sources])
+    except (TypeError, ValueError):
+        return "[]"
+
+
 @dataclass(frozen=True)
 class CachedVerification:
-    """A previously retrieved verdict, ready to be replayed for a claim."""
+    """A previously retrieved verdict, ready to be replayed for a claim.
+
+    The whole evidence trail travels with the verdict. Storing only the verdict
+    would let a replay answer a claim while hiding *why* -- a cached result would
+    show no supporting statement and no citations, so the same claim looked
+    better evidenced when freshly retrieved than when served from cache. These
+    fields default to empty so a row written before migration 002 still reads.
+    """
 
     claim_key: str
     verdict: Verdict
@@ -54,6 +100,11 @@ class CachedVerification:
     source: str
     confidence: Optional[float]
     provider: str
+    #: Evidence-grounded explanation, or None when retrieval produced nothing
+    #: citable. Never reconstructed on replay.
+    supporting_statement: Optional[str] = None
+    #: Ranked citations behind the verdict, decoded from the stored JSON.
+    sources: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class PersistenceStore(Protocol):
@@ -80,6 +131,8 @@ class PersistenceStore(Protocol):
         confidence: Optional[float],
         provider: str,
         session_id: Optional[str],
+        supporting_statement: Optional[str] = None,
+        sources: Optional[List[Dict[str, Any]]] = None,
     ) -> None: ...
 
     async def record_session(
@@ -224,7 +277,8 @@ class SupabaseStore:
                            last_used_at = now()
                      where claim_key = $1 and expires_at > now()
                  returning claim_key, verdict, reason, source,
-                           confidence, provider
+                           confidence, provider,
+                           supporting_statement, sources
                     """,
                     claim_key,
                 )
@@ -243,6 +297,8 @@ class SupabaseStore:
             source=row["source"],
             confidence=row["confidence"],
             provider=row["provider"],
+            supporting_statement=row["supporting_statement"],
+            sources=decode_sources(row["sources"]),
         )
 
     async def put_cached_verification(
@@ -255,8 +311,13 @@ class SupabaseStore:
         confidence: Optional[float],
         provider: str,
         session_id: Optional[str],
+        supporting_statement: Optional[str] = None,
+        sources: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
-        """Store a freshly retrieved verdict. Never raises."""
+        """Store a freshly retrieved verdict with its full evidence trail.
+
+        Never raises.
+        """
         if self._pool is None or not claim_key:
             return
         try:
@@ -265,10 +326,11 @@ class SupabaseStore:
                     """
                     insert into verification_cache (
                         claim_key, verdict, reason, source, confidence,
-                        provider, session_id, expires_at
+                        provider, session_id, supporting_statement, sources,
+                        expires_at
                     )
-                    values ($1, $2, $3, $4, $5, $6, $7,
-                            now() + ($8 || ' seconds')::interval)
+                    values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb,
+                            now() + ($10 || ' seconds')::interval)
                     on conflict (claim_key) do update set
                         verdict    = excluded.verdict,
                         reason     = excluded.reason,
@@ -276,6 +338,8 @@ class SupabaseStore:
                         confidence = excluded.confidence,
                         provider   = excluded.provider,
                         session_id = excluded.session_id,
+                        supporting_statement = excluded.supporting_statement,
+                        sources    = excluded.sources,
                         created_at = now(),
                         last_used_at = now(),
                         expires_at = excluded.expires_at
@@ -287,6 +351,8 @@ class SupabaseStore:
                     confidence,
                     provider,
                     session_id,
+                    supporting_statement,
+                    encode_sources(sources),
                     str(self._ttl_seconds),
                 )
         except Exception as exc:  # noqa: BLE001 - a cache write must never fail a request
@@ -385,7 +451,13 @@ class SupabaseStore:
     async def record_verification(
         self, verification: VerificationEvent, *, from_cache: bool = False
     ) -> None:
-        """Append a verification. Never raises."""
+        """Append a verification, with its evidence trail, to session history.
+
+        The stored history is the audit record for a session, so it keeps the
+        supporting statement and ranked citations alongside the verdict: a review
+        of a past session must be able to show *why* a claim was called true,
+        which the verdict and primary source alone do not say. Never raises.
+        """
         if self._pool is None:
             return
         try:
@@ -394,15 +466,17 @@ class SupabaseStore:
                     """
                     insert into session_verifications (
                         claim_id, session_id, verdict, reason, source,
-                        confidence, from_cache
+                        confidence, from_cache, supporting_statement, sources
                     )
-                    values ($1, $2, $3, $4, $5, $6, $7)
+                    values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
                     on conflict (claim_id) do update set
                         verdict     = excluded.verdict,
                         reason      = excluded.reason,
                         source      = excluded.source,
                         confidence  = excluded.confidence,
                         from_cache  = excluded.from_cache,
+                        supporting_statement = excluded.supporting_statement,
+                        sources     = excluded.sources,
                         created_at  = now()
                     """,
                     verification.claimId,
@@ -412,6 +486,8 @@ class SupabaseStore:
                     verification.source,
                     verification.confidence,
                     from_cache,
+                    verification.supportingStatement,
+                    encode_sources(verification.sources),
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning(

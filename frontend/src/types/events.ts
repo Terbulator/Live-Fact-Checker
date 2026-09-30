@@ -111,12 +111,22 @@ export interface VerificationEvent {
    */
   sources?: EvidenceSource[]
   /**
-   * Relevance of the lead evidence behind the verdict, as reported by the
-   * retrieval provider.
+   * Explanation assembled only from the retrieved evidence, naming the source
+   * it quotes.
    *
-   * Nullable by contract: the checker produces no confidence of its own, so the
-   * backend reports None rather than a fabricated or defaulted number. A client
-   * must render nothing for a null score, never 0% or 100%.
+   * Distinct from `reason`, which is the checker's one-line rationale, and from
+   * `confidence`, which is a number. Null when the search returned no citable
+   * evidence, or when the verification was produced by a team that posts one
+   * without it -- in both cases the UI renders nothing rather than inventing
+   * an explanation.
+   */
+  supportingStatement?: string | null
+  /**
+   * The lead source's relevance score, exactly as the search provider returned
+   * it, or null when it supplied none.
+   *
+   * Nullable by contract: this is never defaulted. A client must render the
+   * absence as "N/A" and must never substitute 100%, 90% or any other number.
    */
   confidence?: number | null
   /** True when the verdict was replayed from the backend's persistent cache. */

@@ -570,3 +570,88 @@ async def test_router_reports_a_verdict_instead_of_a_verification_failure() -> N
     assert ErrorCode.VERIFICATION_FAILED.value not in {
         getattr(event, "code", None) for event in errors
     }
+
+# ---------------------------------------------------------------------------
+# 8. The provider's exact number, and no default in its absence
+# ---------------------------------------------------------------------------
+
+
+def test_evidence_item_does_not_default_confidence_to_one() -> None:
+    """The internal model must not invent a confidence of 1.0.
+
+    ``EvidenceItem.confidence`` used to be ``float = Field(default=1.0)``. That
+    made every evidence item with no provider score indistinguishable from a
+    maximally relevant one, and the fabricated 1.0 then flowed all the way to
+    the dashboard as if Tavily had returned it. Absent must stay absent.
+    """
+    item = EvidenceItem(snippet="A retrieved sentence.", source_url="https://a.example.com/1")
+
+    assert item.confidence is None
+    assert "confidence" in EvidenceItem.model_fields
+    assert EvidenceItem.model_fields["confidence"].default is None
+
+
+@pytest.mark.parametrize("provider_score", [0.9137, 0.4219])
+async def test_provider_score_survives_the_pipeline_bit_for_bit(provider_score: float) -> None:
+    """Tavily's number arrives as the same number, never rounded or rescaled.
+
+    Exact equality on purpose: ``pytest.approx`` would tolerate exactly the kind
+    of drift this guards against. The score is checked at the provider
+    boundary, on the wire, and at the event level.
+    """
+    from verification.retriever import WebSearchRetriever
+
+    parsed = WebSearchRetriever.parse_provider_score(provider_score)
+    assert parsed == provider_score
+
+    evidence = WebSearchRetriever.parse_search_results(
+        [
+            {
+                "url": "https://source.example.com/a",
+                "title": "A retrieved page",
+                "content": "A retrieved sentence that says something checkable.",
+                "score": provider_score,
+            }
+        ]
+    )
+    assert evidence[0].confidence == provider_score
+
+    inner = VerificationServiceEngine(
+        service=VerificationService(retriever=_Retriever(evidence))
+    )
+
+    event = await inner.verify(_claim())
+
+    assert event.confidence == provider_score
+    assert event.sources[0]["confidence"] == provider_score
+    assert event.to_wire()["confidence"] == provider_score
+
+
+async def test_absent_provider_score_stays_absent_end_to_end() -> None:
+    """A provider that sent no score yields ``None`` the whole way through.
+
+    This is the Tavily-omits-``score`` case: the evidence is still real and
+    still cited, it simply carries no confidence anywhere in the system.
+    """
+    from verification.retriever import WebSearchRetriever
+
+    evidence = WebSearchRetriever.parse_search_results(
+        [
+            {
+                "url": "https://source.example.com/a",
+                "title": "A retrieved page",
+                "content": "A retrieved sentence that says something checkable.",
+            }
+        ]
+    )
+    assert evidence[0].confidence is None
+
+    inner = VerificationServiceEngine(
+        service=VerificationService(retriever=_Retriever(evidence))
+    )
+
+    event = await inner.verify(_claim())
+
+    assert event.confidence is None
+    assert event.sources[0]["confidence"] is None
+    assert event.to_wire()["confidence"] is None

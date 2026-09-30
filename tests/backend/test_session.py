@@ -181,7 +181,9 @@ def test_app_shutdown_cancels_surviving_mock_pipelines() -> None:
     from backend.config import Settings
     from backend.main import create_app
 
-    app = create_app(settings=Settings(environment="test", log_level="WARNING"))
+    app = create_app(
+        settings=Settings(environment="test", use_mock_engines=True, log_level="WARNING")
+    )
     with TestClient(app) as client:
         client.post("/session/start", json={"startMockPipeline": True})
         assert app.state.session_manager._background  # a task is tracked

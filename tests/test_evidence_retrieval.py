@@ -475,7 +475,13 @@ def test_missing_url_is_dropped_rather_than_invented() -> None:
     assert all(i.source_url for i in items)
 
 
-def test_unscored_result_is_not_treated_as_maximally_confident() -> None:
+def test_unscored_result_is_reported_as_absent_not_invented() -> None:
+    """A provider that sent no usable score must yield ``None``.
+
+    This is the regression guard for the old ``DEFAULT_UNSCORED_CONFIDENCE``
+    constant, which stamped ``0.60`` onto every unscored result and published
+    that fabricated relevance as if the provider had returned it.
+    """
     transport = _Recorder(
         {"results": [_tavily_result(score=None), _tavily_result(score="not-a-number")]}
     )
@@ -483,8 +489,7 @@ def test_unscored_result_is_not_treated_as_maximally_confident() -> None:
 
     assert items
     for item in items:
-        assert item.confidence == WebSearchRetriever.DEFAULT_UNSCORED_CONFIDENCE
-        assert item.confidence < 1.0
+        assert item.confidence is None
 
 
 def test_zero_score_is_preserved_not_treated_as_missing() -> None:
@@ -493,11 +498,36 @@ def test_zero_score_is_preserved_not_treated_as_missing() -> None:
     assert _retriever(transport).retrieve("anything")[0].confidence == 0.0
 
 
-def test_confidence_is_clamped_into_range() -> None:
+def test_out_of_range_scores_are_rejected_rather_than_clamped() -> None:
+    """Clamping would report a number the provider never gave.
+
+    `5.0` clamped to `1.0` reads as "maximally relevant"; the provider actually
+    said something invalid, so the honest reading is that it said nothing.
+    """
     transport = _Recorder(
         {"results": [_tavily_result(score=5.0), _tavily_result(score=-2.0)]}
     )
-    assert [i.confidence for i in _retriever(transport).retrieve("anything")] == [1.0, 0.0]
+    assert [i.confidence for i in _retriever(transport).retrieve("anything")] == [None, None]
+
+
+@pytest.mark.parametrize(
+    "score",
+    [True, False, "0.9", [0.9], {"score": 0.9}, float("nan"), float("inf"), float("-inf")],
+)
+def test_unusable_provider_scores_become_none(score) -> None:
+    """Bools, strings, containers, NaN and infinities are not scores."""
+    assert WebSearchRetriever.parse_provider_score(score) is None
+
+
+@pytest.mark.parametrize("score", [0.0, 0.001, 0.73, 1.0, 1, 0.5])
+def test_real_provider_scores_pass_through_unchanged(score) -> None:
+    """A score the provider gave is stored exactly as it was given."""
+    assert WebSearchRetriever.parse_provider_score(score) == float(score)
+
+
+def test_no_constant_can_replace_a_missing_score() -> None:
+    """The retriever must expose no fallback constant to reintroduce."""
+    assert not hasattr(WebSearchRetriever, "DEFAULT_UNSCORED_CONFIDENCE")
 
 
 def test_parse_search_results_accepts_a_titled_or_untitled_record() -> None:

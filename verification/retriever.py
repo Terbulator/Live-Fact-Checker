@@ -10,6 +10,7 @@ yields ``[]``, and the checker turns that into an Unverifiable verdict; only a
 genuine provider fault raises.
 """
 
+import math
 import os
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional
@@ -139,11 +140,6 @@ class WebSearchRetriever(EvidenceRetriever):
 
     DEFAULT_PROVIDER = "tavily"
 
-    #: Relevance assumed when a provider supplies no score. Deliberately the
-    #: checker's own threshold, not 1.0: an unscored result has unknown
-    #: relevance and must not be treated as maximally trustworthy evidence.
-    DEFAULT_UNSCORED_CONFIDENCE = 0.60
-
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -186,17 +182,48 @@ class WebSearchRetriever(EvidenceRetriever):
             raise RetrieverConfigurationError(str(exc)) from exc
         return self.provider_client
 
+    @staticmethod
+    def parse_provider_score(raw: Any) -> Optional[float]:
+        """Return the provider's own score, or ``None`` when it gave none.
+
+        This is the only place a search score enters the system, so it is the
+        only place that decides what counts as usable. A score is accepted
+        exactly as the provider sent it, and anything else becomes ``None``:
+
+        * a missing key, ``None`` or a non-numeric value means no score
+        * a bool is rejected even though ``bool`` subclasses ``int``
+        * ``NaN`` and infinities are rejected
+        * a value outside ``0.0..1.0`` is rejected rather than clamped, because
+          clamping would report a number the provider never gave
+
+        Rejecting means ``None``, never a constant. An earlier version assigned
+        ``0.60`` to any unscored result, which published a fabricated relevance
+        to users as if the provider had returned it.
+        """
+        if raw is None or isinstance(raw, bool):
+            return None
+        if not isinstance(raw, (int, float)):
+            return None
+        value = float(raw)
+        if math.isnan(value) or math.isinf(value):
+            return None
+        if not 0.0 <= value <= 1.0:
+            return None
+        return value
+
     @classmethod
     def parse_search_results(cls, raw_results: List[dict]) -> List[EvidenceItem]:
         """Convert generic search API items into EvidenceItem models.
 
         Accepts items with standard keys like:
-        {'title': ..., 'snippet' / 'content' / 'body': ..., 'url' / 'link': ..., 'confidence' / 'score': ...}
+        {'title': ..., 'snippet' / 'content' / 'body': ..., 'url' / 'link' / 'source': ...,
+         'confidence' / 'score': ...}
 
         Records that cannot be attributed are dropped, never backfilled: a
         result with no snippet has nothing to compare, and one with no URL
         cannot be cited, so substituting a placeholder would put a fabricated
-        source in front of the user as if it were real.
+        source in front of the user as if it were real. The relevance score
+        follows the same rule -- see :meth:`parse_provider_score`.
         """
         parsed_items: List[EvidenceItem] = []
         for item in raw_results:
@@ -209,25 +236,19 @@ class WebSearchRetriever(EvidenceRetriever):
             if not snippet_text or not url_text:
                 continue
             title = item.get("title")
-            # Checked against None rather than by truthiness: a legitimate
-            # score of 0.0 is a real (if useless) value, not a missing one.
+            # Both spellings are provider scores. Checked with `is None` rather
+            # than truthiness, so a legitimate 0.0 survives as a real (if
+            # useless) value instead of being mistaken for a missing one.
             raw_conf = item.get("confidence")
             if raw_conf is None:
                 raw_conf = item.get("score")
-            if raw_conf is None:
-                confidence = cls.DEFAULT_UNSCORED_CONFIDENCE
-            else:
-                try:
-                    confidence = max(0.0, min(1.0, float(raw_conf)))
-                except (ValueError, TypeError):
-                    confidence = cls.DEFAULT_UNSCORED_CONFIDENCE
 
             parsed_items.append(
                 EvidenceItem(
                     snippet=snippet_text,
                     source_url=url_text,
                     title=title.strip() if isinstance(title, str) and title.strip() else None,
-                    confidence=confidence,
+                    confidence=cls.parse_provider_score(raw_conf),
                 )
             )
         return parsed_items

@@ -45,8 +45,10 @@ _STANCE_WEIGHT: Dict[str, float] = {
     "conflicting": 0.05,
 }
 
-#: Confidence is already a 0..1 relevance signal, so it dominates the sum while
-#: the per-source bonuses only reorder otherwise-similar results.
+#: Weight on the provider's own relevance score inside the *ranking* sum below.
+#: This is an ordering key and nothing more. It is never published, never
+#: stored and never reported as a confidence, because it is a made-up number
+#: that combines signals the provider never weighed together.
 _CONFIDENCE_WEIGHT = 1.0
 
 #: Small bonuses for a record that is actually citable and readable.
@@ -90,8 +92,17 @@ def _truncate(text: str, limit: int = MAX_SNIPPET_CHARS) -> str:
 
 
 def _score(item: EvidenceItem) -> float:
-    """Return this item's deterministic ranking score."""
-    score = item.confidence * _CONFIDENCE_WEIGHT
+    """Return this item's deterministic **ranking key**.
+
+    This is an internal ordering number, deliberately named ``_score`` rather
+    than ``confidence``: it blends the provider's relevance with stance and
+    record-quality bonuses, so it is not a value any provider returned and must
+    never be shown to a user or persisted as one. An unscored item simply
+    contributes nothing on the relevance term and is ranked on the remaining
+    real signals, rather than being handed a made-up relevance to keep the sum
+    well-formed.
+    """
+    score = (item.confidence or 0.0) * _CONFIDENCE_WEIGHT
     if item.stance is not None:
         score += _STANCE_WEIGHT.get(item.stance, 0.0)
     if item.title and item.title.strip():
@@ -103,6 +114,11 @@ def _score(item: EvidenceItem) -> float:
     if not _host_of(item.source_url):
         score -= 0.25
     return score
+
+
+def source_host(url: str) -> str:
+    """Return the display host for a citation URL, or ``''`` when it has none."""
+    return _host_of(url)
 
 
 def to_source_dict(item: EvidenceItem) -> Dict[str, Any]:

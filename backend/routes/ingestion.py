@@ -20,8 +20,15 @@ from backend.ingestion.models import (
 from backend.ingestion.audio import process_audio_upload, AudioIngestionError
 from backend.ingestion.video import process_video_upload, VideoIngestionError
 from backend.ingestion.url import process_video_url, URLError
+from backend.persistence.store import normalize_claim_key
 from backend.router import EventRouter
-from backend.schemas import ErrorCode, PipelineCounts
+from backend.schemas import ErrorCode, PipelineCounts, VerificationEvent
+from backend.scorecard import (
+    ClaimCheckStatus,
+    VideoClaimResult,
+    build_claim_result,
+    build_scorecard,
+)
 from backend.session_manager import SessionNotFoundError
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
@@ -78,21 +85,82 @@ async def _run_pipeline_on_source(
     session_id: str,
     source,
 ) -> IngestionResponse:
-    """Run the existing claim/verification pipeline on an ingested source."""
+    """Run the existing claim/verification pipeline on an ingested source.
+
+    Each transcript segment is pushed through the unchanged
+    ``transcript -> claim -> verification`` pipeline, so a recorded video is
+    fact-checked by exactly the same code path as live speech and its verdicts
+    reach the frontend over the WebSocket as they resolve.
+
+    On top of that, every claim and verdict is collected so the response can
+    carry the per-claim evidence and the scorecard. Collection is deliberately
+    separate from processing: the pipeline is the source of truth and is not
+    modified to report anything extra, so this only reads what it already
+    produced.
+    """
     router_instance: EventRouter = request.app.state.router
 
-    # Convert segments to transcript events and process through pipeline
     transcript_events = _segments_to_transcript_events(source.transcript_segments, session_id)
 
     total_claims = 0
     total_verifications = 0
     total_errors = 0
+    results: list[VideoClaimResult] = []
+    # Claims already verified earlier in this session, so a claim repeated later
+    # in the video resolves to the verdict it got the first time instead of being
+    # reported as an unchecked failure. This matters for a long video, where the
+    # same claim is often restated.
+    verified_by_claim_id: dict[str, VerificationEvent] = {}
+    # Results indexed by the claim's normalised text, so a restated claim is only
+    # reported once.
+    #
+    # The claim engine already collapses identical claim text within a session,
+    # but a report that silently depended on that would report a video as having
+    # more claims than it contains whenever the engine let a repeat through --
+    # and it would weight the scorecard toward whatever the speaker restated
+    # most. Keying on the normalised text makes the dedup a property of the
+    # report itself rather than of whichever engine is wired in, and it reuses
+    # the same normalisation the fact cache uses to decide two claims are the
+    # same assertion.
+    result_index_by_key: dict[str, int] = {}
 
     for transcript_event in transcript_events:
         counts, claims, verifications = await router_instance.handle_transcript(transcript_event)
         total_claims += counts.claims
         total_verifications += counts.verifications
         total_errors += counts.errors
+
+        for verification in verifications:
+            verified_by_claim_id[verification.claimId] = verification
+
+        for claim in claims:
+            verification = verified_by_claim_id.get(claim.claimId)
+            if verification is None:
+                # Either this claim's check failed, or its id was already
+                # verified earlier in the session and the pipeline deliberately
+                # skipped re-verifying it. Both mean no *new* verdict, and both
+                # are recorded as such rather than as a verdict about the video.
+                verification = await router_instance.sessions.get_verification(
+                    session_id, claim.claimId
+                )
+            result = build_claim_result(claim, verification)
+
+            key = normalize_claim_key(claim.claim)
+            existing_index = result_index_by_key.get(key)
+            if existing_index is None:
+                result_index_by_key[key] = len(results)
+                results.append(result)
+                continue
+
+            # Already reported. Keep the existing entry unless this occurrence
+            # carries a verdict and the one on file does not: the same claim
+            # failing once and succeeding later is still a claim that was
+            # checked, and reporting the failure would hide evidence that exists.
+            existing = results[existing_index]
+            if existing.status is ClaimCheckStatus.FAILED and result.status is not ClaimCheckStatus.FAILED:
+                results[existing_index] = result
+
+    scorecard = build_scorecard(results)
 
     return IngestionResponse(
         source_id=source.source_id,
@@ -102,6 +170,9 @@ async def _run_pipeline_on_source(
         transcript_segments=source.transcript_segments,
         claims_extracted=total_claims,
         verifications_completed=total_verifications,
+        claims=results,
+        scorecard=scorecard,
+        duration_seconds=source.duration_seconds,
     )
 
 

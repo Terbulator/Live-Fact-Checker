@@ -13,6 +13,22 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 import secrets
 
+from backend.scorecard import VideoClaimResult, VideoScorecard
+
+__all__ = [
+    "InputType",
+    "ProcessingStatus",
+    "InputSource",
+    "IngestionRequest",
+    "AudioUploadRequest",
+    "VideoUploadRequest",
+    "VideoURLRequest",
+    "IngestionResponse",
+    "IngestionError",
+    "VideoClaimResult",
+    "VideoScorecard",
+]
+
 
 def _generate_event_id() -> str:
     return secrets.token_urlsafe(16)
@@ -95,7 +111,18 @@ class VideoURLRequest(IngestionRequest):
 
 
 class IngestionResponse(BaseModel):
-    """Response for ingestion endpoints."""
+    """Response for ingestion endpoints.
+
+    The original aggregate counters are unchanged, so any existing consumer keeps
+    working. Two additive fields carry what a person actually needs out of a
+    recorded run:
+
+    * ``claims`` -- every claim the pipeline extracted, with its verdict, the
+      evidence behind it, and the speaker and timestamp it was made at.
+    * ``scorecard`` -- the deterministic summary derived from those claims.
+
+    Both default to empty, so a response built without them is still valid.
+    """
 
     model_config = ConfigDict(extra="ignore")
 
@@ -106,6 +133,12 @@ class IngestionResponse(BaseModel):
     transcript_segments: List[Dict[str, Any]] = Field(default_factory=list)
     claims_extracted: int = 0
     verifications_completed: int = 0
+    # Additive: per-claim results and the scorecard derived from them. See
+    # backend/scorecard.py for why a failed check is never counted as a verdict.
+    claims: List[VideoClaimResult] = Field(default_factory=list)
+    scorecard: Optional[VideoScorecard] = None
+    #: Length of the source media in seconds, when the ingestor measured it.
+    duration_seconds: Optional[float] = None
 
 
 class IngestionError(Exception):

@@ -211,6 +211,7 @@ class VerificationEvent(EventModel):
             "timestamp": 12.4,
             "verdict": "TRUE",
             "reason": "India defeated Sri Lanka in the 2011 final.",
+            "supportingStatement": "The retrieved evidence supports this claim. espncricinfo.com states: “India won the 2011 ICC Cricket World Cup, defeating Sri Lanka in the final.”",
             "source": "https://example.com/source",
             "confidence": 0.92,
             "sources": [
@@ -219,17 +220,17 @@ class VerificationEvent(EventModel):
             ]
         }
 
-    Confidence ownership
-    ---------------------
-    ``confidence`` is a **read-only projection of the evidence**, not a verdict
-    the backend invents. The only confidence signal in this system is the
-    per-source relevance score the retrieval provider returns, which the
-    ``verification`` package carries on
-    :class:`~verification.models.EvidenceItem`. The verdict-level value is
-    therefore the score of the lead ranked source, carried through by
-    :func:`backend.adapters.verification.verdict_confidence`, and is ``None``
-    whenever the provider supplied no score or the claim produced no citable
-    evidence. It is never defaulted, averaged or guessed.
+    Three separate concepts, deliberately not merged
+    -----------------------------------------------
+    * ``verdict`` -- what the system concluded.
+    * ``reason`` / ``supportingStatement`` -- why, in prose. ``reason`` is the
+      checker's one-line rationale; ``supportingStatement`` additionally names
+      the source it quotes and reproduces the retrieved snippet, so a reader
+      can trace it. ``supportingStatement`` is ``None`` when no citable
+      evidence came back, because there is then nothing to ground a sentence
+      in.
+    * ``confidence`` -- how relevant the lead source is, per the search
+      provider. Never a probability of the verdict, and never invented.
     """
 
     type: str = Field(default="verification")
@@ -248,14 +249,25 @@ class VerificationEvent(EventModel):
     # Each entry's `confidence` is the retrieval provider's own relevance score
     # for that source, or absent when the provider supplied none.
     sources: List[Dict[str, Any]] = Field(default_factory=list)
+    supportingStatement: Optional[str] = Field(
+        default=None,
+        description=(
+            "Explanation assembled only from the retrieved evidence, naming "
+            "the source it quotes. None when the search returned no citable "
+            "evidence, or when another team posts a verification directly "
+            "without one. Additive: clients that only read `reason` are "
+            "unaffected."
+        ),
+    )
     confidence: Optional[float] = Field(
         default=None,
         ge=0.0,
         le=1.0,
         description=(
-            "Relevance score of the lead evidence behind this verdict, as "
-            "reported by the retrieval provider. None when the provider "
-            "supplied no score or no source was citable -- never a default."
+            "The lead source's relevance score, exactly as the search "
+            "provider returned it, or None when it supplied none. Never a "
+            "verdict probability and never a default: this value is never "
+            "invented, clamped or averaged."
         ),
     )
     fromCache: bool = Field(

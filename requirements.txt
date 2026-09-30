@@ -6,6 +6,12 @@ uvicorn[standard]>=0.27.0
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 
+# Multipart form parsing, required by the `/ingestion/audio` and
+# `/ingestion/video` upload routes (`File(...)` / `Form(...)`). FastAPI raises
+# at import time without it, so its absence stops the whole application from
+# starting, not just the upload endpoints.
+python-multipart>=0.0.9
+
 # WebSocket test client and async test support for the pytest suite.
 websockets>=12.0
 pytest>=7.0.0

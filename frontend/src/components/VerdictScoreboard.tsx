@@ -19,7 +19,14 @@
  * missing evidence is never a confirmation.
  */
 
-import { formatClock, isLinkableSource, sourceDomain, tallyVerdicts } from '../lib/format'
+import {
+  formatClock,
+  formatConfidence,
+  hasConfidence,
+  isLinkableSource,
+  sourceDomain,
+  tallyVerdicts,
+} from '../lib/format'
 import { CHECKING_DESCRIPTOR, describeVerdict } from '../lib/verdicts'
 import type { ClaimCard } from '../types/model'
 
@@ -42,6 +49,7 @@ export function VerdictScoreboard({ claims, isLive }: VerdictScoreboardProps) {
   const latestDescriptor =
     latestVerification !== null ? describeVerdict(latestVerification.verdict) : null
   const source = latestVerification?.source ?? ''
+  const confidenceReported = hasConfidence(latestVerification?.confidence)
 
   return (
     <section className="scoreboard" aria-label="Verdict summary">
@@ -66,6 +74,17 @@ export function VerdictScoreboard({ claims, isLive }: VerdictScoreboardProps) {
           </span>
           <span className="scoreboard__heroBody">
             <span className="scoreboard__heroVerdict">{latestDescriptor.short}</span>
+            <span
+              className={`card__confidence${confidenceReported ? '' : ' card__confidence--absent'}`}
+              title={
+                confidenceReported
+                  ? 'Relevance score reported by the search provider for the lead source.'
+                  : 'The search provider reported no relevance score for this claim.'
+              }
+            >
+              <span className="card__confidenceLabel">Confidence</span>
+              <span>{formatConfidence(latestVerification.confidence)}</span>
+            </span>
             <span className="scoreboard__heroClaim">
               “{latest?.claim !== '' ? latest?.claim : latestVerification.reason}”
             </span>
@@ -76,6 +95,12 @@ export function VerdictScoreboard({ claims, isLive }: VerdictScoreboardProps) {
                 </span>
               )}
               <span className="scoreboard__heroReason">{latestVerification.reason}</span>
+              {latestVerification.supportingStatement != null &&
+                latestVerification.supportingStatement !== '' && (
+                  <span className="scoreboard__heroStatement">
+                    {latestVerification.supportingStatement}
+                  </span>
+                )}
             </span>
             {source !== '' && (
               <span className="scoreboard__heroSource">

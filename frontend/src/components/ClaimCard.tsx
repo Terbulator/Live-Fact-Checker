@@ -17,6 +17,8 @@ import {
   collectSources,
   displaySpeaker,
   formatClock,
+  formatConfidence,
+  hasConfidence,
   isLinkableSource,
   sourceDomain,
 } from '../lib/format'
@@ -33,6 +35,8 @@ export function ClaimCard({ card, selected, onSelect }: ClaimCardProps) {
   const descriptor = describeCard(card)
   const verification = card.verification
   const sources = verification === null ? [] : collectSources(verification)
+  const statement = verification?.supportingStatement ?? null
+  const reported = hasConfidence(verification?.confidence)
 
   return (
     <li
@@ -76,6 +80,20 @@ export function ClaimCard({ card, selected, onSelect }: ClaimCardProps) {
       {verification !== null && (
         <div className="card__result">
           <p className="card__reason">{verification.reason}</p>
+          {statement !== null && statement !== '' && (
+            <p className="card__statement">{statement}</p>
+          )}
+          <p
+            className={`card__confidence${reported ? '' : ' card__confidence--absent'}`}
+            title={
+              reported
+                ? 'Relevance score reported by the search provider for the lead source.'
+                : 'The search provider reported no relevance score for this claim.'
+            }
+          >
+            <span className="card__confidenceLabel">Confidence</span>
+            <span>{formatConfidence(verification.confidence)}</span>
+          </p>
           {sources.length > 0 && (
             <div className="card__sources">
               {sources.length > 1 && (
