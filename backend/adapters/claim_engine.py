@@ -236,25 +236,52 @@ class LLMClaimEngine(ClaimEngine):
 
 
     def _validate_llm_response(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
-        if not isinstance(data, dict):
+        # Accept both {"claims": [...]} and a top-level array of claims.
+        if isinstance(data, list):
+            claims = data
+        elif isinstance(data, dict):
+            claims = data.get("claims")
+            if not isinstance(claims, list):
+                return []
+        else:
             return []
-        claims = data.get("claims")
-        if not isinstance(claims, list):
-            return []
+
         validated = []
         for item in claims:
             if not isinstance(item, dict):
                 continue
-            claim_text = item.get("claim")
-            claim_type = item.get("claimType")
+
+            # Accept common claim text keys.
+            claim_text = (
+                item.get("claim")
+                or item.get("text")
+                or item.get("statement")
+            )
             if not isinstance(claim_text, str) or not claim_text.strip():
                 continue
+
+            # Accept both claimType (camelCase) and claim_type (snake_case).
+            # Default to "other_checkable_fact" when missing or empty.
+            claim_type = item.get("claimType") or item.get("claim_type")
             if not isinstance(claim_type, str) or not claim_type.strip():
-                continue
+                claim_type = "other_checkable_fact"
+
             validated.append({
                 "claim": claim_text.strip(),
                 "claimType": claim_type.strip()
             })
+
+        # Debug: a non-empty LLM payload that yields zero claims is a contract
+        # mismatch we want visibility into. Never log the API key or full response.
+        if claims and not validated:
+            logger.debug(
+                "LLM Gateway response had %d claim object(s) but none passed "
+                "validation (missing 'claim'/'text'/'statement' or all were "
+                "empty). First raw item keys: %s",
+                len(claims),
+                list(claims[0].keys()) if claims and isinstance(claims[0], dict) else "N/A",
+            )
+
         return validated
 
     async def extract_claims(self, transcript: TranscriptEvent) -> List[ClaimEvent]:

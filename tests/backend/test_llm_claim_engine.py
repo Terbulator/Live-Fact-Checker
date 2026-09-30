@@ -289,7 +289,6 @@ async def test_gateway_reply_inside_a_markdown_code_fence_is_parsed(
         pytest.param("[1, 2, 3]", id="top-level-array"),
         pytest.param('{"results": []}', id="wrong-key"),
         pytest.param('{"claims": [{"claim": "", "claimType": "date"}]}', id="blank-claim"),
-        pytest.param('{"claims": [{"claim": "no type"}]}', id="missing-claim-type"),
         pytest.param('{"claims": ["a bare string"]}', id="claim-not-an-object"),
     ],
 )
@@ -300,6 +299,99 @@ async def test_malformed_llm_json_is_handled_safely(
     _stub_gateway(monkeypatch, content)
     engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
     assert await engine.extract_claims(_transcript("s_malformed")) == []
+
+
+async def test_missing_claim_type_defaults_to_other_checkable_fact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A claim without claimType is accepted with the default type."""
+    _stub_gateway(
+        monkeypatch,
+        '{"claims": [{"claim": "A valid claim without explicit type."}]}',
+    )
+    engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
+    claims = await engine.extract_claims(_transcript("s_missing_type"))
+    assert len(claims) == 1
+    assert claims[0].claim == "A valid claim without explicit type."
+    assert claims[0].claimType == "other_checkable_fact"
+
+
+async def test_snake_case_claim_type_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """claim_type (snake_case) is accepted alongside claimType (camelCase)."""
+    _stub_gateway(
+        monkeypatch,
+        '{"claims": [{"claim": "Snake case type works.", "claim_type": "date"}]}',
+    )
+    engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
+    claims = await engine.extract_claims(_transcript("s_snake"))
+    assert len(claims) == 1
+    assert claims[0].claim == "Snake case type works."
+    assert claims[0].claimType == "date"
+
+
+async def test_claim_text_key_aliases_are_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """text and statement are accepted as claim text keys alongside claim."""
+    for key in ("text", "statement"):
+        _stub_gateway(
+            monkeypatch,
+            json.dumps({"claims": [{key: "Alternative key works.", "claimType": "statistic"}]}),
+        )
+        engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
+        claims = await engine.extract_claims(_transcript("s_alt"))
+        assert len(claims) == 1
+        assert claims[0].claim == "Alternative key works."
+
+
+async def test_top_level_array_response_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A top-level JSON array of claims is accepted (not just {"claims": [...]})."""
+    _stub_gateway(
+        monkeypatch,
+        '[{"claim": "Top level array works.", "claimType": "person"}]',
+    )
+    engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
+    claims = await engine.extract_claims(_transcript("s_toplevel"))
+    assert len(claims) == 1
+    assert claims[0].claim == "Top level array works."
+    assert claims[0].claimType == "person"
+
+
+async def test_empty_claims_array_is_preserved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """{"claims": []} yields zero claims without error."""
+    _stub_gateway(monkeypatch, '{"claims": []}')
+    engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
+    claims = await engine.extract_claims(_transcript("s_empty"))
+    assert claims == []
+
+
+async def test_debug_log_when_non_empty_response_yields_zero_claims(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """DEBUG log is emitted when a non-empty LLM response filters to zero claims."""
+    import logging
+    caplog.set_level(logging.DEBUG, logger="backend.adapters.claim_engine")
+
+    # All items missing claim/text/statement -> all filtered
+    _stub_gateway(
+        monkeypatch,
+        '{"claims": [{"claimType": "date"}, {"foo": "bar"}]}',
+    )
+    engine = LLMClaimEngine(_settings(llm_gateway_api_key=GATEWAY_KEY))
+    claims = await engine.extract_claims(_transcript("s_debug"))
+
+    assert claims == []
+    assert any(
+        "LLM Gateway response had 2 claim object(s) but none passed validation"
+        in record.message
+        for record in caplog.records
+    )
 
 
 async def test_gateway_reply_without_content_is_handled_safely(
