@@ -1615,3 +1615,107 @@ button {
     scroll-behavior: auto !important;
   }
 }
+
+/* ----------------------------------------------------------------- ingestion */
+
+.ingestion-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.ingestion-controls .controls__group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.ingestion-url-input {
+  flex: 1 1 280px;
+  min-width: 200px;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-family: var(--font);
+}
+
+.ingestion-url-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.ingestion-url-input::placeholder {
+  color: var(--text-faint);
+}
+
+.ingestion-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem 0.85rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  animation: lineIn var(--motion) var(--ease) both;
+}
+
+.ingestion-progress__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.ingestion-progress__file {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+
+.ingestion-progress__status {
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.ingestion-progress__bar {
+  height: 4px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.ingestion-progress__fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--supported));
+  border-radius: 999px;
+  transition: width var(--motion) var(--ease);
+}
+
+.ingestion-progress__error {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  color: var(--refuted);
+  font-size: 0.78rem;
+}
+
+.ingestion-progress__success {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  color: var(--supported);
+  font-size: 0.78rem;
+}

@@ -29,6 +29,23 @@ export class ApiError extends Error {
 // Re-export SessionState for consumers
 export type { SessionState }
 
+/** Response from ingestion endpoints. */
+export interface IngestionResponse {
+  source_id: string
+  status: string
+  message: string
+  transcript?: string
+  transcript_segments?: Array<{
+    speaker: string
+    text: string
+    start: number
+    end: number
+    confidence?: number
+  }>
+  claims_extracted: number
+  verifications_completed: number
+}
+
 /** Unwrap `{"detail": {"code": ..., "message": ...}}` from an error body. */
 function toApiError(status: number, body: unknown): ApiError {
   const detail =
@@ -93,6 +110,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T
 }
 
+async function requestFormData<T>(path: string, formData: FormData): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(`${BACKEND_URL}${path}`, {
+      method: 'POST',
+      body: formData,
+    })
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') throw cause
+    throw toUnreachableError()
+  }
+
+  if (!response.ok) {
+    let body: unknown = null
+    try {
+      body = await response.json()
+    } catch {
+    }
+    throw toApiError(response.status, body)
+  }
+
+  return (await response.json()) as T
+}
+
 /**
  * Create a session.
  *
@@ -118,6 +159,39 @@ export function stopSession(sessionId: string): Promise<SessionState> {
     `/session/stop?sessionId=${encodeURIComponent(sessionId)}`,
     { method: 'POST' },
   )
+}
+
+/** Upload an audio file for transcription and fact-checking. */
+export function ingestAudio(
+  sessionId: string,
+  file: File
+): Promise<IngestionResponse> {
+  const formData = new FormData()
+  formData.append('session_id', sessionId)
+  formData.append('file', file)
+  return requestFormData<IngestionResponse>('/ingestion/audio', formData)
+}
+
+/** Upload a video file for audio extraction, transcription and fact-checking. */
+export function ingestVideo(
+  sessionId: string,
+  file: File
+): Promise<IngestionResponse> {
+  const formData = new FormData()
+  formData.append('session_id', sessionId)
+  formData.append('file', file)
+  return requestFormData<IngestionResponse>('/ingestion/video', formData)
+}
+
+/** Process a video URL for transcription and fact-checking. */
+export function ingestVideoUrl(
+  sessionId: string,
+  url: string
+): Promise<IngestionResponse> {
+  return request<IngestionResponse>('/ingestion/video-url', {
+    method: 'POST',
+    body: JSON.stringify({ session_id: sessionId, url }),
+  })
 }
 
 /** Service health, wired engines and credential *presence* (never values). */

@@ -33,6 +33,7 @@ from backend.router import EventRouter
 from backend.routes import assemblyai as assemblyai_routes
 from backend.routes import events as events_routes
 from backend.routes import health as health_routes
+from backend.routes import ingestion as ingestion_routes
 from backend.routes import session as session_routes
 from backend.schemas import (
     ErrorCode,
@@ -287,6 +288,7 @@ def create_app(
     app.include_router(session_routes.router)
     app.include_router(events_routes.router)
     app.include_router(assemblyai_routes.router)
+    app.include_router(ingestion_routes.router)
 
     _register_exception_handlers(app)
     _register_websocket_route(app)
