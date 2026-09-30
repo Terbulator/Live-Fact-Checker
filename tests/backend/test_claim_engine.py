@@ -18,7 +18,7 @@ async def test_claim_extraction_valid_historical_fact():
     assert len(claims) == 1
     c = claims[0]
     assert c.type == "claim"
-    assert c.claimId == "claim_001"
+    assert c.claimId == "session_001_claim_001"
     assert c.sessionId == "session_001"
     assert c.speaker == "Speaker 1"
     assert c.timestamp == 12.4
@@ -63,3 +63,4 @@ async def test_duplicate_claim_prevention():
 
     assert len(claims_1) == 1
     assert len(claims_2) == 0
+    assert claims_1[0].claimId == "session_001_claim_001"

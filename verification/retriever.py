@@ -149,6 +149,20 @@ class MockRetriever(EvidenceRetriever):
             ],
         )
 
+        # 7. 2011 Cricket World Cup (Clearly True - matches Atif's demo claim)
+        self.register_evidence(
+            keywords=["cricket", "world cup", "2011", "india won", "india"],
+            items=[
+                EvidenceItem(
+                    snippet="India won the 2011 ICC Cricket World Cup, defeating Sri Lanka in the final at Wankhede Stadium in Mumbai.",
+                    source_url="https://www.espncricinfo.com/series/icc-cricket-world-cup-2010-11-381449/india-vs-sri-lanka-final-433606/match-report",
+                    title="2011 ICC Cricket World Cup Final",
+                    stance="supports",
+                    confidence=0.99,
+                )
+            ],
+        )
+
     def register_evidence(self, keywords: List[str], items: List[EvidenceItem]) -> None:
         """Dynamically registers evidence for matching queries during tests."""
         self._records.append({

@@ -14,7 +14,6 @@ pytest-asyncio>=0.23.0
 # Voice pipeline (desktop capture -> AssemblyAI -> backend).
 assemblyai>=1.6.0
 python-dotenv>=1.0.0
-pyaudio>=0.2.11
 
 # Testing
 pytest>=7.0.0

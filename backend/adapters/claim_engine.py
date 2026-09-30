@@ -7,6 +7,7 @@ It defines the interface Atif's claim intelligence must satisfy and hands it a v
 
 import json
 import logging
+import asyncio
 from abc import ABC, abstractmethod
 from typing import List, Optional, Sequence, Dict, Any
 
@@ -100,6 +101,46 @@ class LLMClaimEngine(ClaimEngine):
         """Check if the engine has a valid API key configured."""
         return bool(self.api_key and self.api_key != "your_key_here")
 
+    def _get_session_claims(self, session_id: str) -> set:
+        if session_id not in self.seen_claims:
+            self.seen_claims[session_id] = set()
+        return self.seen_claims[session_id]
+
+    def _get_session_counter(self, session_id: str) -> int:
+        if session_id not in self.claim_counter:
+            self.claim_counter[session_id] = 1
+        return self.claim_counter[session_id]
+
+    def _increment_session_counter(self, session_id: str) -> None:
+        self.claim_counter[session_id] = self._get_session_counter(session_id) + 1
+
+    def _generate_claim_id(self, session_id: str) -> str:
+        counter = self._get_session_counter(session_id)
+        self._increment_session_counter(session_id)
+        return f"{session_id}_claim_{counter:03d}"
+
+    def _validate_llm_response(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        if not isinstance(data, dict):
+            return []
+        claims = data.get("claims")
+        if not isinstance(claims, list):
+            return []
+        validated = []
+        for item in claims:
+            if not isinstance(item, dict):
+                continue
+            claim_text = item.get("claim")
+            claim_type = item.get("claimType")
+            if not isinstance(claim_text, str) or not claim_text.strip():
+                continue
+            if not isinstance(claim_type, str) or not claim_type.strip():
+                continue
+            validated.append({
+                "claim": claim_text.strip(),
+                "claimType": claim_type.strip()
+            })
+        return validated
+
     async def extract_claims(self, transcript: TranscriptEvent) -> List[ClaimEvent]:
         text = transcript.text.strip()
         if not text:
@@ -119,6 +160,8 @@ class LLMClaimEngine(ClaimEngine):
             raw_claims = self._get_fallback_claims(text)
 
         claim_events = []
+        session_claims = self._get_session_claims(transcript.sessionId)
+
         for item in raw_claims:
             claim_text = item.get("claim", "").strip()
             if not claim_text:
@@ -126,12 +169,11 @@ class LLMClaimEngine(ClaimEngine):
 
             # Deduplication check (case-insensitive)
             normalized_key = claim_text.lower()
-            if normalized_key in self.seen_claims:
+            if normalized_key in session_claims:
                 continue
-            self.seen_claims.add(normalized_key)
+            session_claims.add(normalized_key)
 
-            claim_id = f"claim_{self.claim_counter:03d}"
-            self.claim_counter += 1
+            claim_id = self._generate_claim_id(transcript.sessionId)
 
             claim_events.append(
                 ClaimEvent(
