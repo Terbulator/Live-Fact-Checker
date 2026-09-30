@@ -32,8 +32,14 @@ describe('App routes', () => {
 
   it('renders the landing hero at /', () => {
     renderAt('/');
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/know what's true/i);
-    expect(screen.getByRole('link', { name: /start a live check/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/fact-check anything/i);
+    // "Start for Free" appears in the nav, the hero and the closing CTA. Every
+    // one of them must lead to the real dashboard.
+    const ctas = screen.getAllByRole('link', { name: /start for free/i });
+    expect(ctas.length).toBeGreaterThan(0);
+    for (const cta of ctas) {
+      expect(cta).toHaveAttribute('href', '/dashboard');
+    }
   });
 
   it('renders the live fact-checker at /dashboard', () => {
@@ -57,7 +63,7 @@ describe('App routes', () => {
 
   it('falls back to the landing page for an unknown path', () => {
     renderAt('/no-such-page');
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/know what's true/i);
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/fact-check anything/i);
   });
 
   it('marks session history as coming soon rather than built', () => {

@@ -1,15 +1,17 @@
-export { LandingPage } from './LandingPage';
-export { Hero } from './Hero';
-export { ProblemSolution } from './ProblemSolution';
-export { HowItWorks } from './HowItWorks';
-export { LiveDemo } from './LiveDemo';
-export { EvidenceSection } from './EvidenceSection';
-export { Differentiator } from './Differentiator';
-export { VerdictSystem } from './VerdictSystem';
-export { UseCases } from './UseCases';
-export { Technology } from './Technology';
-export { Roadmap } from './Roadmap';
-export { TrustSection } from './TrustSection';
-export { FinalCTA } from './FinalCTA';
-export { Footer } from './Footer';
-export { Navigation } from './Navigation';
+/**
+ * Marketing landing page.
+ *
+ * Only `LandingPage` is consumed by the router. The rest are exported so a
+ * section can be reused or tested on its own.
+ */
+export { LandingPage } from './LandingPage'
+export { Navigation } from './Navigation'
+export { Hero } from './Hero'
+export { VideoSection } from './VideoSection'
+export type { VideoSectionProps } from './VideoSection'
+export { PipelineSection, InputTypes } from './PipelineSection'
+export { AskListenVerify } from './AskListenVerify'
+export { EvidenceFlow, SourcesSection } from './EvidenceFlow'
+export { VideoAnalysis, Technology, Capabilities } from './VideoAnalysis'
+export { VideoScorecardSection } from './VideoScorecardSection'
+export { TrustSection, Faq, FinalCTA, Footer } from './TrustSection'
