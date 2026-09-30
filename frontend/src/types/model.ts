@@ -60,6 +60,8 @@ export interface LiveView {
   lastSpeechAt: number | null
   /** The speaker of the most recent transcript event. */
   lastSpeaker: string | null
+  /** Set of event IDs that have already been processed, for deduplication. */
+  processedEventIds: Set<string>
 }
 
 /** The initial, empty view. */
@@ -70,4 +72,5 @@ export const initialLiveView: LiveView = {
   status: 'idle',
   lastSpeechAt: null,
   lastSpeaker: null,
+  processedEventIds: new Set(),
 }

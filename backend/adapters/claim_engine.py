@@ -5,13 +5,15 @@ It defines the interface Atif's claim intelligence must satisfy and hands it a v
 :class:`~backend.schemas.TranscriptEvent`.
 """
 
-import os
 import json
 import logging
 import asyncio
 from abc import ABC, abstractmethod
 from typing import List, Optional, Sequence, Dict, Any
 
+import httpx
+
+from backend.config import get_settings
 from backend.schemas import ClaimEvent, TranscriptEvent
 
 logger = logging.getLogger(__name__)
@@ -72,14 +74,32 @@ class StaticClaimEngine(ClaimEngine):
 
 
 class LLMClaimEngine(ClaimEngine):
-    """Concrete claim engine implementation using AssemblyAI LLM Gateway / Qwen."""
+    """Concrete claim engine implementation using an OpenAI-compatible LLM Gateway.
+
+    Configuration is read from the application settings (environment variables):
+    - LLM_GATEWAY_API_KEY: API key for the LLM Gateway
+    - LLM_GATEWAY_BASE_URL: Base URL for the OpenAI-compatible API
+    - LLM_GATEWAY_MODEL: Model name to use
+    """
 
     name = "llm-claim-engine"
 
-    def __init__(self) -> None:
-        self.seen_claims: Dict[str, set] = {}
-        self.claim_counter: Dict[str, int] = {}
-        self.api_key = os.getenv("LLM_GATEWAY_API_KEY") or os.getenv("ASSEMBLYAI_API_KEY")
+    def __init__(self, settings=None) -> None:
+        self.seen_claims: set = set()
+        self.claim_counter: int = 1
+        self._settings = settings or get_settings()
+
+        # Build the API key from settings (SecretStr -> str)
+        api_key_obj = self._settings.llm_gateway_api_key
+        self.api_key = api_key_obj.get_secret_value() if api_key_obj else None
+
+        # Use configurable base URL and model
+        self.base_url = self._settings.llm_gateway_base_url.rstrip("/")
+        self.model = self._settings.llm_gateway_model
+
+    def is_configured(self) -> bool:
+        """Check if the engine has a valid API key configured."""
+        return bool(self.api_key and self.api_key != "your_key_here")
 
     def _get_session_claims(self, session_id: str) -> set:
         if session_id not in self.seen_claims:
@@ -128,45 +148,13 @@ class LLMClaimEngine(ClaimEngine):
 
         raw_claims = []
 
-        # Use AssemblyAI LLM Gateway if key is available
-        if self.api_key and self.api_key != "your_key_here":
+        if self.is_configured():
             try:
-                import assemblyai as aai
-                aai.settings.api_key = self.api_key
-                gateway = aai.LLMGateway()
-
-                prompt = f"""
-Analyze the following transcript segment and identify ONLY discrete, objectively checkable factual claims (such as statistics, dates, names, historical events, quantities).
-Ignore opinions, preferences, jokes, greetings, filler text, future predictions, or subjective feelings.
-Return valid JSON matching this schema:
-{{
-  "claims": [
-    {{
-      "claim": "string",
-      "claimType": "historical_fact | statistic | date | person | location | scientific_fact | quote | other_checkable_fact"
-    }}
-  ]
-}}
-If there are no checkable claims, return {{"claims": []}}.
-
-Transcript: "{text}"
-"""
-                completion = await asyncio.to_thread(
-                    gateway.chat.completions.create,
-                    model="qwen3.5-4b-32k-fast",
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=500,
-                )
-                content = completion.choices[0].message.content.strip()
-                if content.startswith("```json"):
-                    content = content[7:]
-                if content.endswith("```"):
-                    content = content[:-3]
-
-                data = json.loads(content.strip())
-                raw_claims = self._validate_llm_response(data)
+                raw_claims = await self._call_llm_gateway(text)
             except Exception as e:
-                logger.warning(f"LLM Gateway execution failed: {e}. Falling back to rule-based mock matching.")
+                logger.warning(
+                    f"LLM Gateway call failed: {e}. Falling back to rule-based extraction."
+                )
                 raw_claims = self._get_fallback_claims(text)
         else:
             raw_claims = self._get_fallback_claims(text)
@@ -179,7 +167,7 @@ Transcript: "{text}"
             if not claim_text:
                 continue
 
-            # Deduplication check (session-scoped)
+            # Deduplication check (case-insensitive)
             normalized_key = claim_text.lower()
             if normalized_key in session_claims:
                 continue
@@ -200,6 +188,62 @@ Transcript: "{text}"
             )
 
         return claim_events
+
+    async def _call_llm_gateway(self, text: str) -> List[Dict[str, Any]]:
+        """Call the LLM Gateway using httpx (OpenAI-compatible chat completions)."""
+        if not self.api_key:
+            raise RuntimeError("LLM Gateway API key not configured")
+
+        prompt = self._build_prompt(text)
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 500,
+                    "temperature": 0.0,
+                },
+            )
+
+        response.raise_for_status()
+        data = response.json()
+
+        content = data["choices"][0]["message"]["content"].strip()
+
+        # Strip markdown code fences if present
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+
+        parsed = json.loads(content.strip())
+        return parsed.get("claims", [])
+
+    def _build_prompt(self, text: str) -> str:
+        return f"""
+Analyze the following transcript segment and identify ONLY discrete, objectively checkable factual claims (such as statistics, dates, names, historical events, quantities).
+Ignore opinions, preferences, jokes, greetings, filler text, future predictions, or subjective feelings.
+Return valid JSON matching this schema:
+{{
+  "claims": [
+    {{
+      "claim": "string",
+      "claimType": "historical_fact | statistic | date | person | location | scientific_fact | quote | other_checkable_fact"
+    }}
+  ]
+}}
+If there are no checkable claims, return {{"claims": []}}.
+
+Transcript: "{text}"
+"""
 
     def _get_fallback_claims(self, text: str) -> List[Dict[str, Any]]:
         text_lower = text.lower()

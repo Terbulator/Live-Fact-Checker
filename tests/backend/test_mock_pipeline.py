@@ -81,27 +81,25 @@ def test_mock_pipeline_produces_expected_claim_and_verification(
     assert len(body["verifications"]) == 1
 
     claim = body["claims"][0]
-    assert claim == {
-        "type": "claim",
-        "claimId": "claim_001",
-        "sessionId": session_id,
-        "speaker": REFERENCE_SPEAKER,
-        "timestamp": REFERENCE_TIMESTAMP,
-        "claim": REFERENCE_CLAIM_TEXT,
-        "claimType": "historical_fact",
-    }
+    assert claim["type"] == "claim"
+    assert claim["eventId"]
+    assert claim["claimId"] == "claim_001"
+    assert claim["sessionId"] == session_id
+    assert claim["speaker"] == REFERENCE_SPEAKER
+    assert claim["timestamp"] == REFERENCE_TIMESTAMP
+    assert claim["claim"] == REFERENCE_CLAIM_TEXT
+    assert claim["claimType"] == "historical_fact"
 
     verification = body["verifications"][0]
-    assert verification == {
-        "type": "verification",
-        "claimId": "claim_001",
-        "sessionId": session_id,
-        "speaker": REFERENCE_SPEAKER,
-        "timestamp": REFERENCE_TIMESTAMP,
-        "verdict": "TRUE",
-        "reason": REFERENCE_REASON,
-        "source": REFERENCE_SOURCE,
-    }
+    assert verification["type"] == "verification"
+    assert verification["eventId"]
+    assert verification["claimId"] == "claim_001"
+    assert verification["sessionId"] == session_id
+    assert verification["speaker"] == REFERENCE_SPEAKER
+    assert verification["timestamp"] == REFERENCE_TIMESTAMP
+    assert verification["verdict"] == "TRUE"
+    assert verification["reason"] == REFERENCE_REASON
+    assert verification["source"] == REFERENCE_SOURCE
 
 
 def test_mock_pipeline_runs_without_any_api_key(
@@ -158,8 +156,7 @@ def test_start_session_with_mock_pipeline_option(client: TestClient) -> None:
 
 def test_mock_scripted_stream_broadcasts_reference_claim(client: TestClient) -> None:
     """Drive the scripted stream directly and assert the reference result."""
-    client.post("/session/start", json={})
-    session_id = "session_001"
+    session_id = client.post("/session/start", json={}).json()["sessionId"]
 
     with client.websocket_connect(f"/ws/session/{session_id}") as websocket:
         _drain_until(websocket, "session")

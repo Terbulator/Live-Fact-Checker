@@ -53,6 +53,7 @@ export type ErrorCode = (typeof ERROR_CODES)[number] | (string & {})
 /** One speech-to-text segment. Interim segments have `isFinal: false`. */
 export interface TranscriptEvent {
   type: 'transcript'
+  eventId: string
   sessionId: string
   speaker: string | null
   text: string
@@ -63,6 +64,7 @@ export interface TranscriptEvent {
 /** A checkable claim extracted from a finalized transcript segment. */
 export interface ClaimEvent {
   type: 'claim'
+  eventId: string
   claimId: string
   sessionId: string
   speaker: string | null
@@ -74,6 +76,7 @@ export interface ClaimEvent {
 /** Verdict, rationale and citation for a single claim. */
 export interface VerificationEvent {
   type: 'verification'
+  eventId: string
   claimId: string
   sessionId: string
   speaker: string | null
@@ -86,6 +89,7 @@ export interface VerificationEvent {
 /** A structured failure the frontend is expected to surface, not crash on. */
 export interface ErrorEvent {
   type: 'error'
+  eventId: string
   sessionId: string | null
   code: ErrorCode
   message: string
@@ -97,6 +101,7 @@ export interface ErrorEvent {
 /** Session lifecycle notification. */
 export interface SessionEvent {
   type: 'session'
+  eventId: string
   sessionId: string
   status: SessionEventStatus
   detail?: string | null

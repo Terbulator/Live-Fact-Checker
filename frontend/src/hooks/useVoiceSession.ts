@@ -134,6 +134,8 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
           console.log('[VoiceSession] AssemblyAI disconnected');
           setState((prev) => ({ ...prev, isAssemblyAIConnected: false }));
         },
+        // Provide a callback to fetch fresh tokens on reconnect
+        getToken: fetchAssemblyAIToken,
       });
 
       clientRef.current = client;
@@ -229,8 +231,25 @@ export function useVoiceSession(options: UseVoiceSessionOptions = {}) {
   /** Cleanup on unmount */
   useEffect(() => {
     return () => {
+      // Clean up AssemblyAI client
       if (clientRef.current) {
         clientRef.current.disconnect();
+        clientRef.current = null;
+      }
+      // If we own the session, stop it on the backend
+      // Note: this is fire-and-forget on unmount since we can't await in cleanup
+      if (sessionIdRef.current && ownsSessionRef.current) {
+        const stopPromise = fetch(`${BACKEND_URL}/session/stop?sessionId=${encodeURIComponent(sessionIdRef.current)}`, {
+          method: 'POST',
+          // Use keepalive to ensure request completes even during unmount
+          // (not supported in all environments, e.g. jsdom)
+          keepalive: typeof window !== 'undefined' && 'keepalive' in Request.prototype ? true : false,
+        });
+        if (stopPromise && typeof stopPromise.catch === 'function') {
+          stopPromise.catch(() => {
+            // Ignore errors during unmount
+          });
+        }
       }
     };
   }, []);

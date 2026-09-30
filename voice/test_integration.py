@@ -103,10 +103,10 @@ class TestAssemblyAIIntegration(unittest.IsolatedAsyncioTestCase):
         client.session_id = "session_001"
         client._async_loop = MockAsyncLoop()
 
-        # Partial transcript (turn_is_formatted = False) - with speaker label "Speaker A"
+        # Partial transcript (end_of_turn = False) - with speaker label "Speaker A"
         mock_partial_event = MagicMock()
         mock_partial_event.transcript = "Hello"
-        type(mock_partial_event).turn_is_formatted = PropertyMock(return_value=False)
+        type(mock_partial_event).end_of_turn = PropertyMock(return_value=False)
         mock_partial_event.words = [MockWord(start=1000, end=2000, text="Hello")]
         # Add speaker label to partial so it maps to same speaker as final
         type(mock_partial_event).speaker_label = PropertyMock(return_value="Speaker A")
@@ -116,10 +116,10 @@ class TestAssemblyAIIntegration(unittest.IsolatedAsyncioTestCase):
         # Allow the async task to complete
         await asyncio.sleep(0.01)
 
-        # Final transcript (turn_is_formatted = True) - AssemblyAI speaker "Speaker A" maps to "Speaker 1"
+        # Final transcript (end_of_turn = True) - AssemblyAI speaker "Speaker A" maps to "Speaker 1"
         mock_final_event = MagicMock()
         mock_final_event.transcript = "Hello world"
-        type(mock_final_event).turn_is_formatted = PropertyMock(return_value=True)
+        type(mock_final_event).end_of_turn = PropertyMock(return_value=True)
         type(mock_final_event).speaker_label = PropertyMock(return_value="Speaker A")
         mock_final_event.words = [
             MockWord(start=1000, end=2000, text="Hello"),
@@ -176,7 +176,7 @@ class TestAssemblyAIIntegration(unittest.IsolatedAsyncioTestCase):
 
         mock_turn_event = MagicMock()
         mock_turn_event.transcript = "Hello"
-        type(mock_turn_event).turn_is_formatted = PropertyMock(return_value=True)
+        type(mock_turn_event).end_of_turn = PropertyMock(return_value=True)
         type(mock_turn_event).speaker_label = PropertyMock(return_value="PENDING")
         mock_turn_event.words = [MockWord(start=1000, end=2000, text="Hello")]
 
