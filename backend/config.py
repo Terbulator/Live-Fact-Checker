@@ -14,6 +14,15 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["development", "production", "test"]
 
+#: Backup models the AssemblyAI LLM Gateway tries, in order, when the primary
+#: model is rate limited or errors. Sent per request as the Gateway's native
+#: ``fallbacks`` array, so failover happens server-side without extra client
+#: round trips. AssemblyAI accepts up to two.
+DEFAULT_LLM_GATEWAY_FALLBACK_MODELS = ["gemini-2.5-flash-lite", "gpt-5-nano"]
+
+#: How many of the configured fallbacks the Gateway may try.
+LLM_GATEWAY_FALLBACK_DEPTH = 2
+
 # Origins allowed during local development. Production must configure
 # CORS_ORIGINS explicitly; a wildcard is never assumed.
 LOCAL_DEV_ORIGINS = [
@@ -84,6 +93,21 @@ class Settings(BaseSettings):
         default="qwen3.5-4b-32k-fast",
         description="Model name to use for the LLM Gateway.",
     )
+    llm_gateway_fallback_models: Annotated[List[str], NoDecode] = Field(
+        default_factory=lambda: list(DEFAULT_LLM_GATEWAY_FALLBACK_MODELS),
+        description=(
+            "Comma-separated backup models for the Gateway's native `fallbacks` "
+            "field. When the primary is rate limited or errors, the Gateway "
+            "tries these server-side before returning an error. Empty disables "
+            "failover and relies on client-side retry alone."
+        ),
+    )
+    llm_gateway_fallback_depth: int = Field(
+        default=LLM_GATEWAY_FALLBACK_DEPTH,
+        ge=0,
+        le=2,
+        description="Maximum number of fallback models the Gateway may try.",
+    )
     search_api_key: Optional[SecretStr] = Field(default=None)
     search_provider: str = Field(
         default="tavily",
@@ -116,6 +140,24 @@ class Settings(BaseSettings):
                 if isinstance(decoded, list):
                     return [str(item).strip() for item in decoded if str(item).strip()]
             return [origin.strip() for origin in stripped.split(",") if origin.strip()]
+        return value
+
+    @field_validator("llm_gateway_fallback_models", mode="before")
+    @classmethod
+    def _split_fallback_models(cls, value: object) -> object:
+        """Accept a comma-separated string, a JSON array, or a real list."""
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                try:
+                    decoded = json.loads(stripped)
+                except json.JSONDecodeError:
+                    decoded = None
+                if isinstance(decoded, list):
+                    return [str(item).strip() for item in decoded if str(item).strip()]
+            return [m.strip() for m in stripped.split(",") if m.strip()]
         return value
 
     @field_validator("log_level")

@@ -34,6 +34,11 @@ GATEWAY_RETRY_BASE_SECONDS = 0.5
 #: transcript request for an hour.
 GATEWAY_RETRY_MAX_SECONDS = 8.0
 
+#: How many recent transcript segments per session are remembered when deciding
+#: whether a new final is a near-duplicate. Bounded so a long session cannot
+#: grow this without limit; only recent context matters for fragment repeats.
+MAX_TRACKED_SEGMENTS = 50
+
 #: Punctuation and symbols are the only characters dropped when normalizing a
 #: transcript for pre-gateway deduplication. Letters and digits are preserved,
 #: so genuinely different wording never collapses into a duplicate.
@@ -159,6 +164,9 @@ class LLMClaimEngine(ClaimEngine):
         # session queue on their own gate, so sessions never contend with each
         # other and no global queue is introduced.
         self._session_gates: Dict[str, asyncio.Semaphore] = {}
+        # Normalized segments already sent, oldest first, per session. Bounded:
+        # only recent context is needed to spot a fragment that adds nothing.
+        self._session_segments: Dict[str, List[str]] = {}
         # In strict mode the engine refuses to answer from the offline
         # rule-based extractor and reports a clear error instead. The router
         # turns that into a structured CLAIM_EXTRACTION_FAILED event. Set by
@@ -173,6 +181,16 @@ class LLMClaimEngine(ClaimEngine):
         # Use configurable base URL and model
         self.base_url = self._settings.llm_gateway_base_url.rstrip("/")
         self.model = self._settings.llm_gateway_model
+
+        # Gateway-native failover. These are sent per request as `fallbacks`, so
+        # when the primary is rate limited the Gateway retries on a different
+        # provider server-side instead of the client burning more attempts.
+        self.fallback_models: List[str] = [
+            str(m).strip()
+            for m in (self._settings.llm_gateway_fallback_models or [])
+            if str(m).strip()
+        ]
+        self.fallback_depth = self._settings.llm_gateway_fallback_depth
 
     def is_configured(self) -> bool:
         """Check if the engine has a valid API key configured."""
@@ -233,6 +251,45 @@ class LLMClaimEngine(ClaimEngine):
         if session_id not in self.seen_transcripts:
             self.seen_transcripts[session_id] = set()
         return self.seen_transcripts[session_id]
+
+    def _get_session_segments(self, session_id: str) -> List[str]:
+        if session_id not in self._session_segments:
+            self._session_segments[session_id] = []
+        return self._session_segments[session_id]
+
+    def _is_duplicate_segment(self, session_id: str, key: str) -> bool:
+        """Return True when this segment adds nothing new for the gateway.
+
+        Live endpointing emits several finals for one sentence, so the same words
+        can arrive repeatedly and each arrival would otherwise cost a request.
+        A segment is treated as already seen when it is an exact repeat, or when
+        it is fully contained in something already sent.
+
+        Containment is deliberately one-directional. A later fragment carrying
+        the subject an earlier one lacked -- "Eiffel Tower in India." after "In
+        India." -- is *not* a duplicate and must still reach the gateway,
+        otherwise the claim is lost.
+        """
+        if not key:
+            return False
+        if key in self._get_session_transcripts(session_id):
+            return True
+        return any(key in seen for seen in self._get_session_segments(session_id))
+
+    def _record_segment(self, session_id: str, key: str) -> None:
+        segments = self._get_session_segments(session_id)
+        segments.append(key)
+        overflow = len(segments) - MAX_TRACKED_SEGMENTS
+        if overflow > 0:
+            del segments[:overflow]
+
+    def _forget_segment(self, session_id: str, key: str) -> None:
+        """Undo a reservation so a failed segment stays retryable."""
+        segments = self._get_session_segments(session_id)
+        for index in range(len(segments) - 1, -1, -1):
+            if segments[index] == key:
+                del segments[index]
+                return
 
 
     def _validate_llm_response(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -301,7 +358,7 @@ class LLMClaimEngine(ClaimEngine):
         async with self._get_session_gate(session_id):
             processed = self._get_session_transcripts(session_id)
             key = normalize_transcript(text)
-            if key in processed:
+            if self._is_duplicate_segment(session_id, key):
                 logger.info(
                     "Skipping duplicate transcript for session %s; "
                     "already sent to the LLM Gateway.",
@@ -312,12 +369,14 @@ class LLMClaimEngine(ClaimEngine):
             # Reserved before awaiting the gateway so a concurrent duplicate
             # cannot slip through the check above.
             processed.add(key)
+            self._record_segment(session_id, key)
             try:
                 raw_claims = await self._extract_raw_claims(text)
             except BaseException:
                 # A segment that never produced claims is not "processed". Drop
                 # the reservation so a genuine retry is not suppressed forever.
                 processed.discard(key)
+                self._forget_segment(session_id, key)
                 raise
 
         claim_events = []
@@ -382,23 +441,45 @@ class LLMClaimEngine(ClaimEngine):
             )
             return self._get_fallback_claims(text)
 
-    async def _call_llm_gateway(self, text: str) -> List[Dict[str, Any]]:
-        """Call the LLM Gateway using httpx (OpenAI-compatible chat completions).
+    def _build_payload(self, text: str) -> Dict[str, Any]:
+        """Assemble the Gateway request body for one transcript segment.
 
-        A 429 is retried up to :data:`GATEWAY_MAX_RETRIES` times, honouring a
-        usable ``Retry-After`` and otherwise backing off exponentially. Every
-        other status, 4xx or 5xx, fails immediately: a bad key or a wrong path
-        will not fix itself, and retrying them only deepens the rate limit.
+        When fallback models are configured the request carries the Gateway's
+        native ``fallbacks`` array plus ``fallback_config.depth``, so a rate
+        limited primary is retried on a different provider *inside the Gateway*.
+        That is what turns a 429 on Qwen into a normal 200 served by Gemini or
+        GPT, without the client spending an extra request. Fields not overridden
+        on a fallback -- the prompt, temperature, token budget -- are inherited.
         """
-        if not self.api_key:
-            raise RuntimeError("LLM Gateway API key not configured")
-
-        payload = {
+        payload: Dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": self._build_prompt(text)}],
             "max_tokens": 500,
             "temperature": 0.0,
         }
+        if self.fallback_models and self.fallback_depth > 0:
+            usable = self.fallback_models[: self.fallback_depth]
+            payload["fallbacks"] = [{"model": name} for name in usable]
+            payload["fallback_config"] = {"depth": len(usable)}
+        return payload
+
+    async def _call_llm_gateway(self, text: str) -> List[Dict[str, Any]]:
+        """Call the LLM Gateway using httpx (OpenAI-compatible chat completions).
+
+        Two layers handle rate limiting, and they are complementary:
+
+        * the Gateway's own ``fallbacks`` array, which reroutes a throttled
+          primary to another provider within a single HTTP request
+        * the bounded client-side retry below, kept as a backstop for the case
+          where every model in the chain is throttled at once
+
+        Every other status, 4xx or 5xx, fails immediately: a bad key or a wrong
+        path will not fix itself, and retrying them only deepens the rate limit.
+        """
+        if not self.api_key:
+            raise RuntimeError("LLM Gateway API key not configured")
+
+        payload = self._build_payload(text)
 
         attempts = GATEWAY_MAX_RETRIES + 1
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -481,6 +562,33 @@ class LLMClaimEngine(ClaimEngine):
         delta = (when - datetime.now(timezone.utc)).total_seconds()
         return max(0.0, delta)
 
+    def _log_selected_model(self, data: Any) -> None:
+        """Record which model actually answered.
+
+        Essential with Gateway fallbacks: a 200 may have been served by Gemini or
+        GPT after Qwen was throttled, and only the response's ``model`` field
+        reveals that. The value is treated as untrusted -- coerced to a short
+        string and stripped of anything that could carry a credential -- so this
+        can never become a log-injection or secret-leak path.
+        """
+        if not isinstance(data, dict):
+            return
+        model = data.get("model")
+        if not isinstance(model, str):
+            return
+        safe = "".join(ch for ch in model.strip() if ch.isalnum() or ch in "-_.:/")[:64]
+        if not safe:
+            return
+        if safe != self.model:
+            logger.debug(
+                "LLM Gateway served this request with fallback model %s "
+                "(primary %s).",
+                safe,
+                self.model,
+            )
+        else:
+            logger.debug("LLM Gateway served this request with primary model %s.", safe)
+
     def _parse_gateway_response(self, response: Any) -> List[Dict[str, Any]]:
         """Turn a gateway response into validated claim dicts.
 
@@ -488,6 +596,7 @@ class LLMClaimEngine(ClaimEngine):
         text must degrade to "no claims", never raise through here.
         """
         data = response.json()
+        self._log_selected_model(data)
 
         try:
             content = data["choices"][0]["message"]["content"]
