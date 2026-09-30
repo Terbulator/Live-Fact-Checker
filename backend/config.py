@@ -109,6 +109,33 @@ class Settings(BaseSettings):
         description="Maximum number of fallback models the Gateway may try.",
     )
     search_api_key: Optional[SecretStr] = Field(default=None)
+    supabase_database_url: Optional[SecretStr] = Field(
+        default=None,
+        description=(
+            "Postgres connection string for the persistent fact-check cache and "
+            "session history. Server-side only; never exposed to the browser. "
+            "When unset, persistence is disabled and the live pipeline is "
+            "unaffected."
+        ),
+    )
+    fact_cache_ttl_seconds: int = Field(
+        default=604_800,
+        ge=0,
+        description=(
+            "Lifetime of a cached verification verdict in seconds. Defaults to "
+            "7 days. Expiry is stored on the row, so a stale verdict can never "
+            "be served even if the process never runs a sweep."
+        ),
+    )
+    persistence_timeout_seconds: float = Field(
+        default=2.0,
+        gt=0.0,
+        description=(
+            "Per-statement timeout for persistence queries. Persistence is an "
+            "optimisation: exceeding this degrades to live retrieval rather "
+            "than delaying or failing a verification."
+        ),
+    )
     search_provider: str = Field(
         default="tavily",
         description=(

@@ -28,7 +28,7 @@ owned by :class:`~backend.session_manager.SessionManager`:
   second time, whichever path delivers it again
 """
 
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from backend.adapters.claim_engine import (
     ClaimEngine,
@@ -67,11 +67,37 @@ class EventRouter:
         websocket_manager: WebSocketManager,
         claim_engine: ClaimEngine,
         verification_engine: VerificationEngine,
+        store: Any = None,
     ) -> None:
         self.sessions = session_manager
         self.websockets = websocket_manager
         self.claim_engine = claim_engine
         self.verification_engine = verification_engine
+        # Optional persistent history sink. Absent or null stores make these
+        # calls no-ops, so persistence never affects the pipeline's behaviour.
+        self.store = store
+
+    async def _persist(self, coro_name: str, *args: Any, **kwargs: Any) -> None:
+        """Fire a history write, swallowing every failure.
+
+        Persistence must never delay or break a live pipeline, so this both
+        bounds the wait and discards errors. The store's own methods already
+        fail soft; this guards the call itself.
+        """
+        store = self.store
+        if store is None:
+            return
+        method = getattr(store, coro_name, None)
+        if method is None:
+            return
+        try:
+            await method(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - history is never fatal
+            logger.warning(
+                "Persistence call %s failed (ignored): %s",
+                coro_name,
+                type(exc).__name__,
+            )
 
     # ------------------------------------------------------------------
     # Transcript -> Claim -> Verification
@@ -166,6 +192,7 @@ class EventRouter:
                 speaker=claim.speaker,
             )
             await self.broadcast(session_id, claim)
+            await self._persist("record_claim", claim)
 
             verification, failed = await self._verify_claim(claim)
             if verification is not None:
@@ -234,6 +261,11 @@ class EventRouter:
             verdict=verification.verdict.value,
         )
         await self.broadcast(session_id, verification)
+        await self._persist(
+            "record_verification",
+            verification,
+            from_cache=bool(getattr(verification, "fromCache", False)),
+        )
         return verification, False
 
     # ------------------------------------------------------------------
@@ -270,6 +302,7 @@ class EventRouter:
             source="inbound",
         )
         await self.broadcast(session_id, claim)
+        await self._persist("record_claim", claim)
 
         verification, failed = await self._verify_claim(claim)
         return (
@@ -319,7 +352,13 @@ class EventRouter:
             verdict=verification.verdict.value,
             source="inbound",
         )
-        return verification, await self.broadcast(session_id, verification), False
+        delivered = await self.broadcast(session_id, verification)
+        await self._persist(
+            "record_verification",
+            verification,
+            from_cache=bool(getattr(verification, "fromCache", False)),
+        )
+        return verification, delivered, False
 
     # ------------------------------------------------------------------
     # Broadcasting and errors

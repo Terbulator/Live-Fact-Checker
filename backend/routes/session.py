@@ -15,6 +15,7 @@ from backend.schemas import (
     SessionEvent,
     SessionEventStatus,
     SessionStateResponse,
+    SessionStatus,
     StartSessionRequest,
     StartSessionResponse,
 )
@@ -103,6 +104,16 @@ async def start_session(
             )
             session_manager.track_background_task(session.sessionId, task)
 
+    # Persistent session history. Failures are swallowed by the router helper,
+    # so a database problem cannot prevent the session from being returned.
+    await router_instance._persist(
+        "record_session",
+        session_id=session.sessionId,
+        status=SessionStatus.STARTED.value,
+        created_at=session.createdAt,
+        updated_at=session.updatedAt,
+    )
+
     return response
 
 
@@ -144,6 +155,20 @@ async def stop_session(request: Request, sessionId: str) -> SessionStateResponse
         closed,
         extra={"trace": "SESSION_STOPPED", "sessionId": sessionId},
     )
+
+    await router_instance._persist(
+        "record_session",
+        session_id=sessionId,
+        status=SessionStatus.STOPPED.value,
+        created_at=session.createdAt,
+        updated_at=session.updatedAt,
+        ended_at=session.updatedAt,
+        transcript_count=session.transcriptCount,
+        claim_count=session.claimCount,
+        verification_count=session.verificationCount,
+        error_count=session.errorCount,
+    )
+
     return _state(session, websocket_manager, request)
 
 

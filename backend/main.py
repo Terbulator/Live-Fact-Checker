@@ -11,7 +11,7 @@ Run locally::
 
 import json
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 
 from backend.adapters.claim_engine import ClaimEngine, LLMClaimEngine
 from backend.adapters.verification import (
+    CachedVerificationEngine,
     UnavailableVerificationEngine,
     VerificationEngine,
     VerificationServiceEngine,
@@ -26,6 +27,7 @@ from backend.adapters.verification import (
 from backend.config import Settings, get_settings
 from backend.logging_config import configure_logging, get_logger
 from backend.mocks.mock_stream import MockClaimEngine, MockVerificationEngine
+from backend.persistence import PersistenceStore, build_store
 from backend.router import EventRouter
 from backend.routes import assemblyai as assemblyai_routes
 from backend.routes import events as events_routes
@@ -121,6 +123,23 @@ def _default_verification_engine(settings: Settings) -> VerificationEngine:
         return UnavailableVerificationEngine()
 
 
+def _is_strict_claim_engine(claim_engine: ClaimEngine) -> bool:
+    """Return True when the claim engine cannot fall back to hardcoded rules.
+
+    Strictness is the single property that makes persistence safe. It is the
+    one configuration in which ``LLMClaimEngine``'s rule-based fallback
+    extractor is unreachable, so a fabricated answer cannot be written to the
+    cache and later replayed to another user as a retrieved verdict.
+
+    Anything that is not an ``LLMClaimEngine`` -- the mock engine, the
+    unavailable stub, a test double -- is treated as non-strict and therefore
+    not persisted.
+    """
+    return isinstance(claim_engine, LLMClaimEngine) and bool(
+        getattr(claim_engine, "strict", False)
+    )
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Configure logging on startup and tear down state on shutdown."""
@@ -134,6 +153,7 @@ async def _lifespan(app: FastAPI):
                 settings.assemblyai_api_key,
                 settings.llm_gateway_api_key,
                 settings.search_api_key,
+                settings.supabase_database_url,
             )
             if value is not None
         ],
@@ -147,11 +167,17 @@ async def _lifespan(app: FastAPI):
         extra={"trace": "BACKEND_STARTING", "mockEngines": settings.use_mock_engines},
     )
     try:
+        store = getattr(app.state, "store", None)
+        if store is not None:
+            await store.connect()
         yield
     finally:
         # Settle the mock pipelines first so no task is left pending.
         await app.state.session_manager.cancel_all_background_tasks()
         await app.state.websocket_manager.clear()
+        store = getattr(app.state, "store", None)
+        if store is not None:
+            await store.close()
         logger.info("Backend stopped", extra={"trace": "BACKEND_STOPPED"})
 
 
@@ -159,6 +185,7 @@ def create_app(
     settings: Optional[Settings] = None,
     claim_engine: Optional[ClaimEngine] = None,
     verification_engine: Optional[VerificationEngine] = None,
+    store: Optional[Any] = None,
 ) -> FastAPI:
     """Build the ASGI application.
 
@@ -173,11 +200,25 @@ def create_app(
     resolved_verification_engine = verification_engine or _default_verification_engine(
         resolved_settings
     )
+
+    # Persistence is used only when it is both configured and safe to use.
+    # `build_store` refuses in mock mode and with a non-strict claim engine, so
+    # no mock or rule-based answer can reach the store or be replayed from it.
+    store = store or build_store(
+        resolved_settings,
+        strict=_is_strict_claim_engine(resolved_claim_engine),
+    )
+    if store.enabled:
+        resolved_verification_engine = CachedVerificationEngine(
+            resolved_verification_engine, store
+        )
+
     event_router = EventRouter(
         session_manager=session_manager,
         websocket_manager=websocket_manager,
         claim_engine=resolved_claim_engine,
         verification_engine=resolved_verification_engine,
+        store=store,
     )
 
     app = FastAPI(
@@ -192,6 +233,7 @@ def create_app(
     app.state.websocket_manager = websocket_manager
     app.state.claim_engine = resolved_claim_engine
     app.state.verification_engine = resolved_verification_engine
+    app.state.store = store
     app.state.router = event_router
 
     # CORS: explicit origins only. A wildcard is rejected in production by
