@@ -212,10 +212,24 @@ class VerificationEvent(EventModel):
             "verdict": "TRUE",
             "reason": "India defeated Sri Lanka in the 2011 final.",
             "source": "https://example.com/source",
+            "confidence": 0.92,
             "sources": [
-                {"url": "https://example.com/source", "title": "Article Title", "snippet": "..."}
+                {"url": "https://example.com/source", "title": "Article Title",
+                 "snippet": "...", "confidence": 0.92}
             ]
         }
+
+    Confidence ownership
+    ---------------------
+    ``confidence`` is a **read-only projection of the evidence**, not a verdict
+    the backend invents. The only confidence signal in this system is the
+    per-source relevance score the retrieval provider returns, which the
+    ``verification`` package carries on
+    :class:`~verification.models.EvidenceItem`. The verdict-level value is
+    therefore the score of the lead ranked source, carried through by
+    :func:`backend.adapters.verification.verdict_confidence`, and is ``None``
+    whenever the provider supplied no score or the claim produced no citable
+    evidence. It is never defaulted, averaged or guessed.
     """
 
     type: str = Field(default="verification")
@@ -231,7 +245,27 @@ class VerificationEvent(EventModel):
     # verdict, already documented in the example above. `source` remains the
     # single primary citation for existing consumers; this carries the rest.
     # Defaults to an empty list, so any event built without it is still valid.
+    # Each entry's `confidence` is the retrieval provider's own relevance score
+    # for that source, or absent when the provider supplied none.
     sources: List[Dict[str, Any]] = Field(default_factory=list)
+    confidence: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Relevance score of the lead evidence behind this verdict, as "
+            "reported by the retrieval provider. None when the provider "
+            "supplied no score or no source was citable -- never a default."
+        ),
+    )
+    fromCache: bool = Field(
+        default=False,
+        description=(
+            "True when this verdict was replayed from the persistent cache "
+            "rather than freshly retrieved. Lets a consumer, and stored session "
+            "history, distinguish the provenance of the answer."
+        ),
+    )
 
     @field_validator("type")
     @classmethod
@@ -247,15 +281,18 @@ class VerificationEvent(EventModel):
 
     @model_validator(mode="after")
     def _reject_lowercase_verdict(self) -> "VerificationEvent":
-        """Accept only the uppercase external verdict values."""
-        if isinstance(self.verdict, str) and self.verdict not in {
-            Verdict.TRUE.value,
-            Verdict.FALSE.value,
-            Verdict.UNVERIFIABLE.value,
-        }:
-            raise ValueError(
-                "verdict must be one of 'TRUE', 'FALSE', 'UNVERIFIABLE' (uppercase)."
-            )
+        """Accept only the uppercase external verdict values.
+
+        The allowed set is derived from :class:`Verdict` rather than restated
+        here, so a verdict can never be added to the enum and forgotten in this
+        validator. Restating it is how ``AMBIGUOUS`` became translatable by the
+        adapter and the database, yet rejected here -- which failed every
+        ambiguous claim instead of reporting it.
+        """
+        allowed = {member.value for member in Verdict}
+        if isinstance(self.verdict, str) and self.verdict not in allowed:
+            expected = ", ".join(repr(value) for value in sorted(allowed))
+            raise ValueError(f"verdict must be one of {expected} (uppercase).")
         return self
 
 

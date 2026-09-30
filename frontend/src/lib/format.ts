@@ -118,6 +118,8 @@ export interface VerdictTally {
   true: number
   false: number
   unverifiable: number
+  /** Sources support more than one reading, so neither branch is confirmed. */
+  ambiguous: number
   /** Verdict of the most recently resolved claim, for the hero display. */
   latest: Verdict | null
 }
@@ -129,6 +131,7 @@ export function tallyVerdicts(
     true: 0,
     false: 0,
     unverifiable: 0,
+    ambiguous: 0,
     latest: null,
   }
 
@@ -137,6 +140,7 @@ export function tallyVerdicts(
     if (verdict === 'TRUE') tally.true += 1
     else if (verdict === 'FALSE') tally.false += 1
     else if (verdict === 'UNVERIFIABLE') tally.unverifiable += 1
+    else if (verdict === 'AMBIGUOUS') tally.ambiguous += 1
     else continue
     tally.latest = verdict
   }

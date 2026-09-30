@@ -31,7 +31,7 @@ export interface VerdictScoreboardProps {
 
 export function VerdictScoreboard({ claims, isLive }: VerdictScoreboardProps) {
   const tally = tallyVerdicts(claims)
-  const checked = tally.true + tally.false + tally.unverifiable
+  const checked = tally.true + tally.false + tally.unverifiable + tally.ambiguous
   const pending = claims.length - checked
 
   const resolved = claims.filter((card) => card.verification !== null)
@@ -152,6 +152,10 @@ export function VerdictScoreboard({ claims, isLive }: VerdictScoreboardProps) {
         <div className="scoreboard__stat scoreboard__stat--unknown">
           <dt>Unverifiable</dt>
           <dd>{tally.unverifiable}</dd>
+        </div>
+        <div className="scoreboard__stat scoreboard__stat--unknown">
+          <dt>Ambiguous</dt>
+          <dd>{tally.ambiguous}</dd>
         </div>
         <div className="scoreboard__stat scoreboard__stat--pending">
           <dt>Checking</dt>

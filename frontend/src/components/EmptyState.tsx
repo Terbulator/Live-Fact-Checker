@@ -45,6 +45,7 @@ const VERDICT_LEGEND = [
   { key: 'TRUE', ...VERDICT_DESCRIPTORS.TRUE },
   { key: 'FALSE', ...VERDICT_DESCRIPTORS.FALSE },
   { key: 'UNVERIFIABLE', ...VERDICT_DESCRIPTORS.UNVERIFIABLE },
+  { key: 'AMBIGUOUS', ...VERDICT_DESCRIPTORS.AMBIGUOUS },
 ] as const
 
 export function EmptyState({

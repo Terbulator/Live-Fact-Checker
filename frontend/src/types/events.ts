@@ -18,7 +18,7 @@
  */
 
 /** Verdict values allowed by `backend.schemas.Verdict`. */
-export const VERDICTS = ['TRUE', 'FALSE', 'UNVERIFIABLE'] as const
+export const VERDICTS = ['TRUE', 'FALSE', 'UNVERIFIABLE', 'AMBIGUOUS'] as const
 export type Verdict = (typeof VERDICTS)[number]
 
 /** Status values carried by a `session` event (`SessionEventStatus`). */
@@ -84,6 +84,11 @@ export interface EvidenceSource {
   url: string
   title: string | null
   snippet: string | null
+  /**
+   * The retrieval provider's own relevance score for this source, or null when
+   * it supplied none. The UI must never substitute a value of its own.
+   */
+  confidence?: number | null
 }
 
 /** Verdict, rationale and citation for a single claim. */
@@ -105,6 +110,17 @@ export interface VerificationEvent {
    * sends no such field. The UI must treat its absence as "one source".
    */
   sources?: EvidenceSource[]
+  /**
+   * Relevance of the lead evidence behind the verdict, as reported by the
+   * retrieval provider.
+   *
+   * Nullable by contract: the checker produces no confidence of its own, so the
+   * backend reports None rather than a fabricated or defaulted number. A client
+   * must render nothing for a null score, never 0% or 100%.
+   */
+  confidence?: number | null
+  /** True when the verdict was replayed from the backend's persistent cache. */
+  fromCache?: boolean
 }
 
 /** A structured failure the frontend is expected to surface, not crash on. */

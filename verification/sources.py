@@ -106,11 +106,19 @@ def _score(item: EvidenceItem) -> float:
 
 
 def to_source_dict(item: EvidenceItem) -> Dict[str, Any]:
-    """Convert one :class:`EvidenceItem` into its wire shape."""
+    """Convert one :class:`EvidenceItem` into its wire shape.
+
+    ``confidence`` is the retrieval provider's own relevance score for this
+    source, passed through unchanged. It is evidence metadata, so it travels
+    with the citation it describes: the backend adapter reads the lead entry to
+    populate the event-level ``confidence``, which is why dropping it here would
+    leave the verdict with no honest confidence to report.
+    """
     return {
         "url": item.source_url,
         "title": item.title if item.title and item.title.strip() else None,
         "snippet": _truncate(item.snippet) if item.snippet else None,
+        "confidence": item.confidence,
     }
 
 

@@ -49,6 +49,13 @@ export const VERDICT_DESCRIPTORS: Record<Verdict, VerdictDescriptor> = {
     description: 'Evidence is missing, weak or conflicting.',
     glyph: '?',
   },
+  AMBIGUOUS: {
+    label: 'Ambiguous',
+    short: 'AMBIGUOUS',
+    tone: 'unknown',
+    description: 'Evidence supports more than one reading of the claim.',
+    glyph: '~',
+  },
 }
 
 const FALLBACK: VerdictDescriptor = {

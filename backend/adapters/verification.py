@@ -95,6 +95,39 @@ def to_internal_claim_payload(claim: ClaimEvent) -> Dict:
     }
 
 
+def _wire_confidence(entry: Dict[str, Any]) -> Optional[float]:
+    """Return an entry's provider confidence, or ``None`` when unusable.
+
+    A score only survives if the provider actually sent a finite number inside
+    the 0..1 range the contract declares. Anything else is treated as absent,
+    because a coerced or defaulted number here would be a fabricated
+    confidence presented to a user as evidence quality.
+    """
+    raw = entry.get("confidence")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    if raw != raw or raw in (float("inf"), float("-inf")):  # NaN / infinity
+        return None
+    if not 0.0 <= float(raw) <= 1.0:
+        return None
+    return float(raw)
+
+
+def verdict_confidence(sources: List[Dict[str, Any]]) -> Optional[float]:
+    """Return the verdict-level confidence implied by ranked ``sources``.
+
+    Confidence in this system belongs to the **evidence**, not to the verdict:
+    the retrieval provider scores each source, and the checker produces no score
+    of its own. The event-level value is therefore the score of the lead ranked
+    source -- the one whose URL is published as ``source`` -- and is ``None``
+    when the provider supplied no score or nothing was citable. It is never
+    synthesised, averaged or defaulted.
+    """
+    if not sources:
+        return None
+    return _wire_confidence(sources[0])
+
+
 def to_wire_sources(sources: Any) -> List[Dict[str, Any]]:
     """Normalise the internal ``sources`` list onto the backend wire shape.
 
@@ -103,6 +136,10 @@ def to_wire_sources(sources: Any) -> List[Dict[str, Any]]:
     ``None``, still yields ``[]`` rather than failing the whole verification.
     Only entries carrying a non-empty string ``url`` survive: a source that
     cannot be linked is not something to put in front of a user.
+
+    ``confidence`` is carried through per entry rather than hoisted here, so a
+    consumer can see how well attested each individual citation is and
+    :func:`verdict_confidence` can report the lead one honestly.
     """
     if not sources or not isinstance(sources, (list, tuple)):
         return []
@@ -122,6 +159,7 @@ def to_wire_sources(sources: Any) -> List[Dict[str, Any]]:
 
         title = entry.get("title")
         snippet = entry.get("snippet")
+        confidence = _wire_confidence(entry)
         wire_sources.append(
             {
                 "url": normalised,
@@ -129,6 +167,7 @@ def to_wire_sources(sources: Any) -> List[Dict[str, Any]]:
                 "snippet": snippet.strip()
                 if isinstance(snippet, str) and snippet.strip()
                 else None,
+                "confidence": confidence,
             }
         )
     return wire_sources
@@ -190,6 +229,8 @@ class VerificationServiceEngine(VerificationEngine):
                 claimId=claim.claimId,
             ) from exc
 
+        wire_sources = to_wire_sources(getattr(internal, "sources", None))
+
         return VerificationEvent(
             type="verification",
             claimId=claim.claimId,
@@ -201,7 +242,10 @@ class VerificationServiceEngine(VerificationEngine):
             # `source` is still authoritative for existing consumers; `sources`
             # is the additive, backward-compatible extension.
             source=internal.source,
-            sources=to_wire_sources(getattr(internal, "sources", None)),
+            sources=wire_sources,
+            # Read off the lead ranked source, never invented. None when the
+            # provider scored nothing or no source was citable.
+            confidence=verdict_confidence(wire_sources),
         )
 
 

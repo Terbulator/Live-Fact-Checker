@@ -138,10 +138,6 @@ class EvidenceItem(BaseModel):
         description="Reliability / relevance score between 0.0 and 1.0"
     )
 
-    def to_source_dict(self) -> Dict[str, Any]:
-        """Convert to a source dict for the multi-source output."""
-        return {
-            "url": self.source_url,
-            "title": self.title,
-            "snippet": self.snippet,
-        }
+    # Wire shape lives in ``verification.sources.to_source_dict``. A second copy
+    # here drifted from it (it dropped ``confidence`` and the snippet
+    # truncation), so there is exactly one definition to keep correct.
