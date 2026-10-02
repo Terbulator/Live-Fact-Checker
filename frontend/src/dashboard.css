@@ -1,0 +1,2640 @@
+/* =============================================================================
+   Live Fact Checker — the workspace at /dashboard
+   -----------------------------------------------------------------------------
+   Scoped to `.lfp-dash`, and coloured only with the landing page's `--lfp-*`
+   tokens (marketing.css) plus `color-mix()`. No hex value appears in this file:
+   the palette is the product's, and a change to it is a change there.
+
+   THE COMPOSITION
+   A conversation, not a control room. Reading order is the page order:
+
+     side      history and connection, quiet, always the same width
+     head      what this conversation is, one line
+     thread    the messages, centred, capped, spacious
+     dock      one composer, pinned
+
+   WHAT WAS REMOVED, AND WHY
+   A message is not a card. The user's message is a quiet bubble, the assistant's
+   answer is plain type on the page, and the pipeline is a line of metadata that
+   folds itself away once the run has finished. The only surface with a border is
+   the composer, because it is the one thing on the page that is genuinely an
+   input.
+
+   Everything behind a claim, a source, the transcript or a processing step stays
+   one row away: nothing was deleted, only collapsed.
+   ========================================================================== */
+
+.lfp-dash {
+  --dash-side: 296px;
+  /* The conversation is a column of prose, so it is capped well short of the
+     content area and centred, with paper either side. */
+  --dash-thread: 940px;
+  --dash-shadow: 0 1px 2px color-mix(in srgb, var(--lfp-night) 3%, transparent);
+  --dash-shadow-lift: 0 6px 24px color-mix(in srgb, var(--lfp-night) 7%, transparent);
+
+  /* Semantic families. One verdict, one colour, used everywhere it appears.
+     These are the landing page's own verdict tokens rather than its muted
+     accents: a verdict is read as text, and the accents are mixed for fills. */
+  --dash-true: var(--lfp-v-true);
+  --dash-false: var(--lfp-v-false);
+  --dash-unverifiable: var(--lfp-v-unverifiable);
+  --dash-ambiguous: var(--lfp-v-ambiguous);
+  --dash-checking: var(--lfp-v-ambiguous);
+  --dash-media: color-mix(in srgb, var(--lfp-orange) 74%, var(--lfp-ink));
+  --dash-link: var(--lfp-blue);
+}
+
+.lfp-dash *,
+.lfp-dash *::before,
+.lfp-dash *::after {
+  box-sizing: border-box;
+}
+
+.lfp-dash {
+  display: grid;
+  grid-template-columns: var(--dash-side) minmax(0, 1fr);
+  height: 100dvh;
+  background: var(--lfp-paper);
+  color: var(--lfp-ink);
+  font-size: 15px;
+  line-height: 1.6;
+  overflow: hidden;
+}
+
+.lfp-dash :focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--lfp-green) 60%, transparent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+@keyframes dash-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes dash-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+}
+
+@keyframes dash-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.lfp-dash .spin {
+  animation: dash-spin 800ms linear infinite;
+}
+
+/* ================================================================= shell === */
+
+.shell {
+  display: contents;
+}
+
+.shell__main {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  /* The columns were never declared, so this grid had a single implicit `auto`
+     track. `auto` as a maximum is max-content, so once a conversation was wide
+     enough the track grew past the viewport -- and because `.lfp-dash` clips its
+     overflow, the excess was silently cut off rather than scrolled or wrapped.
+     Naming the track is what makes the row actually bounded by the container and
+     lets the thread wrap to the width it was given. */
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  height: 100dvh;
+  background: var(--lfp-paper);
+}
+
+/* ================================================================ sidebar == */
+/* The rail is furniture: present, legible, and never competing with the thread. */
+
+.side {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100dvh;
+  min-width: 0;
+  border-right: 1px solid var(--lfp-line-soft);
+  background: color-mix(in srgb, var(--lfp-warm) 62%, var(--lfp-paper));
+}
+
+.side__top {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 18px 16px 14px;
+}
+
+.side__brand {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 0 2px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.side__mark {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: var(--lfp-green-soft);
+  color: color-mix(in srgb, var(--lfp-green) 80%, var(--lfp-ink));
+}
+
+.side__brandText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.side__name {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  color: var(--lfp-ink);
+}
+
+.side__tag {
+  font-size: 0.71rem;
+  line-height: 1.4;
+  color: var(--lfp-ink-3);
+}
+
+/* The one saturated control in the product: the accent is here and nowhere
+   else in the rail. */
+.side__new {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--lfp-lime);
+  color: var(--lfp-ink);
+  font-size: 0.84rem;
+  font-weight: 640;
+  transition: background 180ms var(--lfp-ease);
+}
+
+.side__new:hover {
+  background: color-mix(in srgb, var(--lfp-lime) 80%, var(--lfp-green-soft));
+}
+
+.side__close {
+  display: none;
+  position: absolute;
+  top: 16px;
+  right: 14px;
+  padding: 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--lfp-ink-3);
+}
+
+.side__search {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--lfp-white) 70%, transparent);
+  color: var(--lfp-ink-3);
+}
+
+.side__search:focus-within {
+  background: var(--lfp-white);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lfp-green) 35%, transparent);
+}
+
+.side__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--lfp-ink);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.side__search input:focus {
+  outline: none;
+}
+
+.side__search input::placeholder {
+  color: var(--lfp-ink-3);
+}
+
+.side__history {
+  overflow-y: auto;
+  padding: 4px 10px 20px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--lfp-line) transparent;
+}
+
+.side__group + .side__group {
+  margin-top: 16px;
+}
+
+.side__groupLabel {
+  margin: 0 0 5px;
+  padding: 0 8px;
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--lfp-ink-3);
+}
+
+.side__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Active: a pale green ground with a green rule. Never a dark fill — the rail
+   has to stay as light as the conversation it frames. */
+.side__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px 8px 11px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  text-align: left;
+  transition: background 160ms var(--lfp-ease), border-color 160ms var(--lfp-ease);
+}
+
+.side__item:hover {
+  background: color-mix(in srgb, var(--lfp-white) 65%, transparent);
+}
+
+.side__item--active {
+  border-left-color: var(--lfp-green);
+  background: color-mix(in srgb, var(--lfp-green-soft) 34%, transparent);
+}
+
+.side__itemTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.83rem;
+  font-weight: 550;
+  line-height: 1.45;
+  color: var(--lfp-ink);
+}
+
+.side__itemMeta {
+  display: flex;
+  gap: 6px;
+  font-size: 0.67rem;
+  line-height: 1.4;
+  color: var(--lfp-ink-3);
+}
+
+.side__itemMeta > span + span::before {
+  content: '·';
+  margin-right: 6px;
+}
+
+.side__itemKind {
+  font-weight: 600;
+  color: var(--lfp-ink-2);
+}
+
+.side__none {
+  margin: 0;
+  padding: 22px 12px;
+  font-size: 0.8rem;
+  color: var(--lfp-ink-3);
+  text-align: center;
+}
+
+.side__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--lfp-line-soft);
+}
+
+.conn {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  padding: 0 4px 4px;
+}
+
+.conn__dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lfp-line);
+}
+
+.conn--on .conn__dot {
+  background: var(--lfp-green);
+}
+
+.conn__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.conn__body strong {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--lfp-ink-2);
+}
+
+.conn__body span {
+  font-size: 0.67rem;
+  color: var(--lfp-ink-3);
+}
+
+.account {
+  position: relative;
+}
+
+.account__button {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
+  transition: background 160ms var(--lfp-ease);
+}
+
+.account__button:hover {
+  background: color-mix(in srgb, var(--lfp-white) 70%, transparent);
+}
+
+.account__avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--lfp-beige);
+  color: var(--lfp-ink-2);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.account__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.account__text strong {
+  font-size: 0.79rem;
+  font-weight: 600;
+  color: var(--lfp-ink);
+}
+
+.account__text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.67rem;
+  color: var(--lfp-ink-3);
+}
+
+.account__chevron {
+  margin-left: auto;
+  color: var(--lfp-ink-3);
+  font-size: 0.78rem;
+}
+
+.account__menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  padding: 5px;
+  border: 1px solid var(--lfp-line);
+  border-radius: 12px;
+  background: var(--lfp-white);
+  box-shadow: var(--dash-shadow-lift);
+  animation: dash-rise 160ms var(--lfp-ease) both;
+}
+
+.account__menuItem {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 0.79rem;
+  color: var(--lfp-ink-2);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.account__menuItem:hover {
+  background: var(--lfp-warm);
+  color: var(--lfp-ink);
+}
+
+.account__menuItem--soon {
+  color: var(--lfp-ink-3);
+}
+
+/* The account feature is not built, so the card says so rather than pretending
+   to be a working profile. */
+.side__soon {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--lfp-line);
+  border-radius: 999px;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--lfp-ink-3);
+}
+
+.scrim {
+  display: none;
+  border: 0;
+  padding: 0;
+  background: color-mix(in srgb, var(--lfp-night) 34%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms var(--lfp-ease);
+}
+
+/* ================================================================== head === */
+/* One line: what this conversation is, and two things a reader may do with it. */
+
+.head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 20px;
+  border-bottom: 1px solid var(--lfp-line-soft);
+}
+
+/* A mark rather than an icon in a box: it identifies the thread without adding
+   another rectangle to the page. */
+.head__mark {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  background: var(--lfp-green-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lfp-green) 45%, transparent);
+}
+
+.head__title {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.head__name {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.92rem;
+  font-weight: 640;
+  letter-spacing: -0.005em;
+  color: var(--lfp-ink);
+}
+
+.head__input {
+  min-width: 0;
+  max-width: 44ch;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--lfp-white);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lfp-green) 45%, transparent);
+  color: var(--lfp-ink);
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 640;
+}
+
+.head__sub {
+  min-width: 0;
+  margin: 0;
+  padding-left: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  color: var(--lfp-ink-3);
+}
+
+.head__iconBtn {
+  display: grid;
+  place-items: center;
+  padding: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lfp-ink-3);
+  transition: background 160ms var(--lfp-ease), color 160ms var(--lfp-ease);
+}
+
+.head__iconBtn:hover {
+  background: var(--lfp-beige);
+  color: var(--lfp-ink);
+}
+
+/* The header's icon-only controls are sized by their glyph — 21px for the 13px
+   pencil, 24px for the 16px ellipsis — which is under the 24px minimum target
+   and well under anything a thumb can hit. On a pointer device the box grows and
+   the glyph stays centred in it; nothing moves, nothing is restyled, and a mouse
+   is unaffected. */
+@media (pointer: coarse) {
+  .head__iconBtn {
+    min-width: 38px;
+    min-height: 38px;
+    padding: 0;
+  }
+
+  .head__menuBtn {
+    width: 38px;
+    height: 38px;
+  }
+}
+
+.head__actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.head__btn {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 11px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--lfp-ink-3);
+  font-size: 0.77rem;
+  font-weight: 560;
+  transition: background 160ms var(--lfp-ease), color 160ms var(--lfp-ease);
+}
+
+.head__btn:hover {
+  background: var(--lfp-beige);
+  color: var(--lfp-ink);
+}
+
+/* Only a drawer trigger on a narrow screen; on desktop the rail is already
+   there and this would be a second way to open the same list. */
+.head__menuBtn {
+  display: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--lfp-ink-2);
+}
+
+.head__menu {
+  position: relative;
+}
+
+.head__menuList {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 5px;
+  border: 1px solid var(--lfp-line);
+  border-radius: 12px;
+  background: var(--lfp-white);
+  box-shadow: var(--dash-shadow-lift);
+  animation: dash-rise 160ms var(--lfp-ease) both;
+}
+
+.head__menuItem {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 0.79rem;
+  color: var(--lfp-ink-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.head__menuItem:hover {
+  background: var(--lfp-warm);
+  color: var(--lfp-ink);
+}
+
+/* ================================================================ thread == */
+
+.thread {
+  overflow-y: auto;
+  padding: 40px 24px 12px;
+  scroll-behavior: smooth;
+}
+
+/* Generous space *between* messages is what makes a thread read as a
+   conversation. Space inside a message is kept tight so it stays one thought. */
+.thread__inner {
+  display: flex;
+  flex-direction: column;
+  gap: 44px;
+  max-width: var(--dash-thread);
+  margin-inline: auto;
+}
+
+.thread__pair {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* The reader's own message: right-aligned, compact, and no card. A hairline on a
+   warm ground separates it from the page without announcing a panel. */
+.turn--you {
+  align-items: flex-end;
+}
+
+.bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(520px, 78%);
+  padding: 10px 14px;
+  border-radius: 14px 14px 4px 14px;
+  background: color-mix(in srgb, var(--lfp-beige) 58%, var(--lfp-white));
+}
+
+.bubble__kind {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+  font-size: 0.67rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--lfp-ink-3);
+}
+
+.bubble__time {
+  margin-left: auto;
+  font-weight: 500;
+}
+
+.bubble__text {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--lfp-ink);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.bubble__attach {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.bubble__thumb {
+  flex-shrink: 0;
+  width: 52px;
+  height: 33px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--lfp-white);
+}
+
+.bubble__attachIcon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--dash-media) 14%, var(--lfp-white));
+  color: var(--dash-media);
+}
+
+.bubble__attachBody {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.bubble__attachName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.79rem;
+  font-weight: 550;
+  color: var(--lfp-ink);
+}
+
+.bubble__attachMeta {
+  font-size: 0.67rem;
+  color: var(--lfp-ink-3);
+}
+
+.bubble__link {
+  align-self: flex-start;
+  font-size: 0.81rem;
+  font-weight: 550;
+  color: color-mix(in srgb, var(--dash-link) 58%, var(--lfp-ink));
+  overflow-wrap: anywhere;
+}
+
+.turn__outcome {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--lfp-ink-3);
+}
+
+.turn__outcomeLabel {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dash-true) 10%, transparent);
+  color: var(--dash-true);
+  font-weight: 620;
+}
+
+/* Everything the product says. Left-aligned, no frame: an answer is prose. */
+.turn--app {
+  gap: 14px;
+}
+
+.turn__who {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--lfp-ink-3);
+}
+
+.turn__mark {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--lfp-green);
+}
+
+.turn__waiting {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--lfp-ink-3);
+}
+
+/* =============================================================== pipeline = */
+/* Metadata, not a timeline panel: small type, small dots, no container. */
+
+.pipe__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pipe__step {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 2px 7px 2px 4px;
+  border-radius: 999px;
+  font-size: 0.71rem;
+  line-height: 1.5;
+  color: var(--lfp-ink-3);
+  transition: background 200ms var(--lfp-ease), color 200ms var(--lfp-ease);
+}
+
+.pipe__step--done {
+  color: color-mix(in srgb, var(--dash-true) 62%, var(--lfp-ink-2));
+}
+
+.pipe__step--active {
+  background: color-mix(in srgb, var(--dash-checking) 11%, transparent);
+  color: color-mix(in srgb, var(--dash-checking) 66%, var(--lfp-ink));
+  font-weight: 570;
+}
+
+.pipe__step--failed {
+  background: color-mix(in srgb, var(--lfp-red-soft) 26%, transparent);
+  color: var(--dash-false);
+}
+
+.pipe__marker {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid var(--lfp-line);
+  border-radius: 50%;
+  color: transparent;
+}
+
+.pipe__step--done .pipe__marker {
+  border-color: color-mix(in srgb, var(--dash-true) 50%, transparent);
+  color: var(--dash-true);
+}
+
+.pipe__step--active .pipe__marker {
+  border-color: var(--dash-checking);
+  color: var(--dash-checking);
+  animation: dash-pulse 1.4s var(--lfp-ease) infinite;
+}
+
+.pipe__step--failed .pipe__marker {
+  border-color: color-mix(in srgb, var(--dash-false) 55%, transparent);
+  color: var(--dash-false);
+}
+
+.pipe__label {
+  white-space: nowrap;
+}
+
+/* A hairline between stages. Not an arrow: the stages are adjacent, and an
+   arrow would make a run of six read as a process diagram. */
+.pipe__link {
+  width: 14px;
+  height: 1px;
+  margin: 0 6px;
+  background: var(--lfp-line-soft);
+}
+
+/* ================================================================= result = */
+/* No card. The answer is the message, so it is type on the page. */
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: dash-rise 240ms var(--lfp-ease) both;
+}
+
+.result__heading {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 660;
+  letter-spacing: -0.01em;
+  color: var(--lfp-green);
+}
+
+.result__sentence {
+  margin: 0;
+  font-size: 1.06rem;
+  line-height: 1.6;
+  color: var(--lfp-ink);
+}
+
+/* Four verdicts as inline pills: the distribution at a glance, in one line of
+   reading, tinted weakly enough to colour the sentence rather than replace it. */
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pill {
+  --pill-tone: var(--lfp-line);
+
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pill-tone) 11%, var(--lfp-white));
+  color: color-mix(in srgb, var(--pill-tone) 72%, var(--lfp-ink));
+  font-size: 0.74rem;
+  font-weight: 560;
+  line-height: 1.5;
+}
+
+.pill--true {
+  --pill-tone: var(--dash-true);
+}
+
+.pill--false {
+  --pill-tone: var(--dash-false);
+}
+
+.pill--unverifiable {
+  --pill-tone: var(--dash-unverifiable);
+}
+
+.pill--ambiguous {
+  --pill-tone: var(--dash-ambiguous);
+}
+
+.pill svg {
+  color: var(--pill-tone);
+}
+
+.pill__count {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pill__label {
+  font-size: 0.64rem;
+  font-weight: 640;
+  letter-spacing: 0.07em;
+}
+
+/* A bucket at zero is still stated: the reader needs to know it was measured and
+   found empty, not that it was never looked for. */
+.pill[data-empty='true'] {
+  opacity: 0.62;
+}
+
+.result__facts {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--lfp-ink-3);
+}
+
+.result__failed,
+.result__note {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--lfp-ink-3);
+}
+
+.result__failed {
+  color: color-mix(in srgb, var(--dash-false) 74%, var(--lfp-ink));
+}
+
+.scorecard {
+  margin-top: -2px;
+}
+
+/* ============================================================ disclosure == */
+/* Four rows and a rule between them. Not cards: there is nothing here to frame. */
+
+.details {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--lfp-line-soft);
+  margin-top: 2px;
+}
+
+.reveal {
+  border-bottom: 1px solid var(--lfp-line-soft);
+}
+
+.reveal__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 11px 2px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  transition: background 160ms var(--lfp-ease);
+}
+
+.reveal__row:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--lfp-warm) 70%, transparent);
+}
+
+.reveal__row:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.reveal__chevron {
+  flex-shrink: 0;
+  color: var(--lfp-ink-3);
+  transition: transform 200ms var(--lfp-ease);
+}
+
+.reveal--open .reveal__chevron {
+  transform: rotate(90deg);
+}
+
+.reveal__label {
+  font-size: 0.85rem;
+  font-weight: 580;
+  color: var(--lfp-ink);
+}
+
+.reveal__meta {
+  font-size: 0.76rem;
+  color: var(--lfp-ink-3);
+}
+
+.reveal__body {
+  padding: 2px 0 16px 20px;
+  animation: dash-rise 180ms var(--lfp-ease) both;
+}
+
+.reveal__empty {
+  margin: 0;
+  padding: 6px 0;
+  font-size: 0.8rem;
+  color: var(--lfp-ink-3);
+}
+
+/* ================================================================ sources == */
+/* A name, a host, and the snippet that justified it. The accent is a 2px rule,
+   which is enough to scan and not enough to become a colour block. */
+
+.sources {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.source {
+  padding-left: 11px;
+  border-left: 2px solid var(--lfp-blue);
+}
+
+.source:nth-child(even) {
+  border-left-color: var(--lfp-lavender);
+}
+
+.source__title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0;
+  font-size: 0.83rem;
+  font-weight: 560;
+  line-height: 1.5;
+}
+
+.source__title a {
+  color: var(--lfp-ink);
+  text-decoration: none;
+}
+
+.source__title a:hover {
+  text-decoration: underline;
+}
+
+.source__domain {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--lfp-ink-3);
+}
+
+.source__snippet {
+  margin: 2px 0 0;
+  font-size: 0.79rem;
+  line-height: 1.55;
+  color: var(--lfp-ink-2);
+}
+
+.source__score {
+  margin: 2px 0 0;
+  font-size: 0.67rem;
+  color: var(--lfp-ink-3);
+}
+
+/* ============================================================= processing = */
+/* A timeline, drawn with one hairline and a dot per stage. */
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--lfp-ink-3);
+}
+
+/* The connector is drawn on the list, not on each row, so a stage that changes
+   state never shifts the line beside it. */
+.step + .step::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: -6px;
+  width: 1px;
+  height: 12px;
+  background: var(--lfp-line-soft);
+}
+
+.step--done,
+.step--active {
+  color: var(--lfp-ink);
+}
+
+.step--active {
+  color: color-mix(in srgb, var(--dash-checking) 66%, var(--lfp-ink));
+}
+
+.step--failed {
+  color: var(--dash-false);
+}
+
+.step__marker {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  margin-left: 0;
+  border: 1.5px solid var(--lfp-line);
+  border-radius: 50%;
+  background: var(--lfp-paper);
+}
+
+.step--done .step__marker {
+  border-color: var(--dash-true);
+  background: var(--dash-true);
+  box-shadow: inset 0 0 0 2px var(--lfp-paper);
+}
+
+.step--active .step__marker {
+  border-color: var(--dash-checking);
+  animation: dash-pulse 1.4s var(--lfp-ease) infinite;
+}
+
+.step--failed .step__marker {
+  border-color: var(--dash-false);
+  background: color-mix(in srgb, var(--dash-false) 22%, var(--lfp-paper));
+}
+
+.steps__media {
+  margin: 8px 0 0;
+  font-size: 0.74rem;
+  color: var(--lfp-ink-3);
+}
+
+/* ============================================================== composer == */
+/* The strongest element on the page, and the only surface with a border: it is
+   the one thing here that is genuinely an input. */
+
+.dock {
+  padding: 12px 24px max(18px, env(safe-area-inset-bottom, 0px));
+}
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: var(--dash-thread);
+  margin-inline: auto;
+  padding: 12px 12px 10px 16px;
+  border: 1px solid var(--lfp-line);
+  border-radius: 16px;
+  background: var(--lfp-white);
+  box-shadow: var(--dash-shadow-lift);
+  transition: border-color 200ms var(--lfp-ease), box-shadow 200ms var(--lfp-ease);
+}
+
+/* Focus is a soft green edge and a wide, very quiet glow -- enough to see where
+   the caret is, not enough to glow. */
+.composer:focus-within {
+  border-color: color-mix(in srgb, var(--lfp-green) 42%, var(--lfp-line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lfp-green-soft) 34%, transparent),
+    var(--dash-shadow-lift);
+}
+
+.composer--listening {
+  border-color: color-mix(in srgb, var(--lfp-green) 52%, var(--lfp-line));
+}
+
+.composer__attachment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  animation: dash-rise 180ms var(--lfp-ease) both;
+}
+
+.attachcard {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  max-width: 320px;
+  padding: 6px 7px 6px 8px;
+  border-radius: 10px;
+  background: var(--lfp-warm);
+}
+
+.attachcard__thumb {
+  flex-shrink: 0;
+  width: 44px;
+  height: 28px;
+  border-radius: 5px;
+  object-fit: cover;
+  background: var(--lfp-beige);
+}
+
+.attachcard__glyph {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--dash-media) 13%, var(--lfp-white));
+  color: var(--dash-media);
+}
+
+.attachcard--url .attachcard__glyph {
+  background: color-mix(in srgb, var(--dash-link) 13%, var(--lfp-white));
+  color: var(--dash-link);
+}
+
+.attachcard__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.attachcard__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  font-weight: 550;
+  color: var(--lfp-ink);
+}
+
+.attachcard__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.67rem;
+  color: var(--lfp-ink-3);
+}
+
+.attachcard__remove {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lfp-ink-3);
+}
+
+.attachcard__remove:hover {
+  background: var(--lfp-beige);
+  color: var(--lfp-ink);
+}
+
+.composer__input {
+  width: 100%;
+  min-height: 44px;
+  max-height: 200px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--lfp-ink);
+  font: inherit;
+  font-size: 0.99rem;
+  line-height: 1.6;
+  resize: none;
+}
+
+.composer__input:focus {
+  outline: none;
+}
+
+.composer__input::placeholder {
+  color: var(--lfp-ink-3);
+}
+
+.composer__bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 6px;
+}
+
+.composer__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  align-items: center;
+}
+
+.composer__tool {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--lfp-ink-3);
+  font-size: 0.78rem;
+  font-weight: 550;
+  transition: background 160ms var(--lfp-ease), color 160ms var(--lfp-ease);
+}
+
+.composer__tool:hover:not(:disabled) {
+  background: var(--lfp-warm);
+  color: var(--lfp-ink);
+}
+
+.composer__tool:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.composer__voice--live {
+  background: color-mix(in srgb, var(--lfp-green-soft) 45%, transparent);
+  color: var(--lfp-ink);
+  font-weight: 620;
+}
+
+.composer__voiceDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--lfp-green);
+  animation: dash-pulse 1.3s var(--lfp-ease) infinite;
+}
+
+.composer__actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.composer__hint {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--lfp-ink-3);
+}
+
+/* One Send, and it is a circle: the smallest thing on the page that still says
+   "go". */
+.composer__send {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--lfp-ink);
+  color: var(--lfp-paper-text);
+  transition: background 180ms var(--lfp-ease), opacity 180ms var(--lfp-ease),
+    transform 180ms var(--lfp-ease);
+}
+
+.composer__send:hover:not(:disabled) {
+  background: var(--lfp-black);
+  transform: translateY(-1px);
+}
+
+.composer__send:disabled {
+  opacity: 0.22;
+  cursor: not-allowed;
+}
+
+/* ========================================================= empty state === */
+
+.welcome {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  max-width: 460px;
+  margin: clamp(48px, 14vh, 140px) auto 0;
+  text-align: center;
+  animation: dash-rise 300ms var(--lfp-ease) both;
+}
+
+.welcome__title {
+  margin: 0;
+  font-size: clamp(1.5rem, 3vw, 1.9rem);
+  font-weight: 660;
+  letter-spacing: -0.02em;
+  color: var(--lfp-ink);
+}
+
+.welcome__lede {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--lfp-ink-2);
+}
+
+/* Three real ways in, stated plainly. Not sample claims and not example
+   verdicts: a first-time reader only has to be able to tell that nothing here
+   has been checked yet. */
+.welcome__list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--lfp-ink-3);
+}
+
+.welcome__key {
+  display: inline-block;
+  min-width: 6.4rem;
+  margin-right: 8px;
+  font-weight: 600;
+  color: var(--lfp-ink-2);
+  text-align: left;
+}
+
+/* =================================================== claims / transcript === */
+/* Claims, the video scorecard and the transcript are rendered by components that
+   already know the data. What changes here is only how they sit in a
+   conversation: a claim is an entry in a list, not a card in a grid, so it keeps
+   its own heading, its verdict, its reasoning and its evidence, and loses the
+   frame. */
+
+.lfp-dash .empty {
+  margin: 0;
+  padding: 8px 0;
+  font-size: 0.8rem;
+  color: var(--lfp-ink-3);
+}
+
+/* One tone per verdict, set once here and read by the accent rules and by every
+   descendant that needs it. */
+.lfp-dash .card--supported,
+.lfp-dash .vclaim--supported,
+.lfp-dash .line--supported {
+  --tone: var(--dash-true);
+  --tone-soft: color-mix(in srgb, var(--dash-true) 12%, transparent);
+}
+
+.lfp-dash .card--refuted,
+.lfp-dash .vclaim--refuted,
+.lfp-dash .line--refuted {
+  --tone: var(--dash-false);
+  --tone-soft: color-mix(in srgb, var(--dash-false) 12%, transparent);
+}
+
+.lfp-dash .card--unknown,
+.lfp-dash .vclaim--unknown,
+.lfp-dash .line--unknown {
+  --tone: var(--dash-unverifiable);
+  --tone-soft: color-mix(in srgb, var(--dash-unverifiable) 14%, transparent);
+}
+
+.lfp-dash .card--ambiguous,
+.lfp-dash .vclaim--ambiguous,
+.lfp-dash .line--ambiguous {
+  --tone: var(--dash-ambiguous);
+  --tone-soft: color-mix(in srgb, var(--dash-ambiguous) 14%, transparent);
+}
+
+.lfp-dash .card--checking,
+.lfp-dash .vclaim--checking,
+.lfp-dash .vclaim--unchecked,
+.lfp-dash .line--checking {
+  --tone: var(--dash-checking);
+  --tone-soft: color-mix(in srgb, var(--dash-checking) 12%, transparent);
+}
+
+/* The verdict itself: a tinted word with a glyph, because the glyph is what
+   makes it readable without relying on hue. */
+.lfp-dash .verdict {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--tone-soft, transparent);
+  color: var(--tone, var(--lfp-ink-2));
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.lfp-dash .verdict__glyph {
+  font-size: 0.66rem;
+  line-height: 1;
+}
+
+.lfp-dash .verdict__spinner {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: dash-spin 700ms linear infinite;
+}
+
+/* -------------------------------------------------------------- a claim --- */
+
+.details .cards,
+.details .vclaims__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.details .vclaims {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.details .vclaims__title {
+  margin: 0 0 6px;
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lfp-ink-3);
+}
+
+.details .vclaims__count {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* A rule between claims, and a 2px verdict rule down the side of each: enough
+   to scan a long list, not enough to become a column of boxes. */
+.details .cards .card + .card,
+.details .vclaims__list .vclaim + .vclaim {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--lfp-line-soft);
+}
+
+.details .card,
+.details .vclaim {
+  padding-left: 10px;
+  border: 0;
+  border-left: 2px solid var(--tone, var(--lfp-line));
+  border-radius: 0;
+  background: transparent;
+  transition: background 160ms var(--lfp-ease);
+}
+
+.details .card:hover {
+  background: color-mix(in srgb, var(--lfp-warm) 55%, transparent);
+}
+
+/* Selecting a claim scrolls the transcript to the moment it was made, so the
+   selection needs to be visible somewhere it is not always in view. */
+.details .card--selected {
+  box-shadow: none;
+  background: color-mix(in srgb, var(--tone-soft, transparent) 90%, transparent);
+}
+
+.details .card__button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.card__head,
+.vclaim__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: baseline;
+}
+
+.card__speaker,
+.vclaim__speaker {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--lfp-ink-2);
+}
+
+.card__clock,
+.vclaim__clock {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--lfp-ink-3);
+}
+
+.card__type {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--lfp-warm);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--lfp-ink-3);
+}
+
+.card__claim,
+.vclaim__text {
+  display: block;
+  margin: 5px 0 0;
+  font-size: 0.94rem;
+  font-weight: 550;
+  line-height: 1.55;
+  color: var(--lfp-ink);
+  overflow-wrap: anywhere;
+}
+
+/* The reasoning, the supporting statement, the confidence: separated from the
+   claim by a rule so the claim is the first thing read, not the fourth. */
+.card__result,
+.vclaim__result {
+  margin: 8px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--lfp-line-soft);
+}
+
+.card__reason,
+.vclaim__reason,
+.card__statement,
+.vclaim__statement,
+.vclaim__failure {
+  margin: 0 0 5px;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: var(--lfp-ink-2);
+}
+
+.card__statement,
+.vclaim__statement {
+  padding-left: 9px;
+  border-left: 2px solid var(--tone-soft, var(--lfp-line-soft));
+}
+
+.vclaim__failure {
+  color: color-mix(in srgb, var(--dash-false) 74%, var(--lfp-ink));
+}
+
+.card__confidence,
+.vclaim__confidence {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--lfp-ink-3);
+}
+
+.card__confidenceLabel,
+.vclaim__confidenceLabel {
+  font-weight: 600;
+}
+
+.card__confidence--absent,
+.vclaim__confidence--absent {
+  font-style: italic;
+}
+
+.vclaim__cache {
+  align-self: flex-start;
+  margin: 5px 0 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--lfp-warm);
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: var(--lfp-ink-3);
+}
+
+.vclaim__srStatus {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* -------------------------------------------------------------- sources --- */
+
+.card__sources {
+  margin-top: 7px;
+}
+
+.card__sourceLabel,
+.vclaim__sourceLabel {
+  margin: 0 0 4px;
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--lfp-ink-3);
+}
+
+.card__sourceList,
+.vclaim__sources {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 7px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The evidence under a claim: a rule and an indent, not a nested card. */
+.card__sourceItem,
+.vclaim__sourceItem {
+  padding: 6px 0 6px 10px;
+  border: 0;
+  border-left: 2px solid var(--lfp-blue);
+  border-radius: 0;
+  background: transparent;
+}
+
+.card__sourceItem:nth-child(even),
+.vclaim__sourceItem:nth-child(even) {
+  border-left-color: var(--lfp-lavender);
+}
+
+.card__source,
+.vclaim__source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.card__link,
+.vclaim__link {
+  font-weight: 550;
+  color: var(--lfp-ink);
+  text-decoration: none;
+}
+
+.card__link:hover,
+.vclaim__link:hover {
+  text-decoration: underline;
+}
+
+.card__external {
+  font-size: 0.68rem;
+  color: var(--lfp-ink-3);
+}
+
+.card__sourceText,
+.vclaim__sourceText {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--lfp-ink-2);
+}
+
+.card__sourceDomain,
+.vclaim__sourceDomain {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.66rem;
+  color: var(--lfp-ink-3);
+}
+
+.card__snippet,
+.vclaim__snippet {
+  margin: 3px 0 0;
+  font-size: 0.79rem;
+  line-height: 1.55;
+  color: var(--lfp-ink-2);
+}
+
+/* ------------------------------------------------------------ scorecard --- */
+
+.vscore {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.vscore__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.vscore__title {
+  margin: 0;
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lfp-ink-3);
+}
+
+.vscore__source,
+.vscore__duration {
+  font-size: 0.72rem;
+  color: var(--lfp-ink-3);
+}
+
+/* Coverage is a number with a bar behind it, because "how much was checked" is
+   the question this component exists to answer. */
+.vscore__coverage {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin-bottom: 9px;
+  font-size: 0.72rem;
+  color: var(--lfp-ink-3);
+}
+
+.vscore__coverageBar {
+  flex: 1;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--lfp-line-soft);
+  overflow: hidden;
+}
+
+.vscore__coverageFill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--dash-true);
+}
+
+.vscore__rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  gap: 8px 18px;
+  margin: 0;
+}
+
+.vscore__row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.vscore__rowLabel {
+  font-size: 0.64rem;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--lfp-ink-3);
+}
+
+.vscore__rowValue {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 1.05rem;
+  font-weight: 660;
+  color: var(--lfp-ink);
+}
+
+.vscore__rowCount {
+  font-variant-numeric: tabular-nums;
+}
+
+.vscore__rowShare {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--lfp-ink-3);
+}
+
+.vscore__rowNote {
+  font-size: 0.66rem;
+  color: var(--lfp-ink-3);
+}
+
+/* A stage that did not complete has no verdict, and saying so in place of a
+   number is the point of the row. */
+.vscore__row--failure .vscore__rowValue {
+  font-size: 0.8rem;
+  font-weight: 550;
+  color: color-mix(in srgb, var(--dash-false) 74%, var(--lfp-ink));
+}
+
+.scorecard .vscore {
+  padding-top: 12px;
+  border-top: 1px solid var(--lfp-line-soft);
+}
+
+/* ----------------------------------------------------------- transcript --- */
+
+.panel--transcript,
+.panel--errors {
+  border: 0;
+  border-left: 2px solid var(--lfp-line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.panel__title {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0 0 6px;
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lfp-ink-3);
+}
+
+.panel__count {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.details .transcript {
+  max-height: 420px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--lfp-line) transparent;
+}
+
+/* A line is text. Interim speech is lighter because it may still change, and
+   the line that a selected claim came from is the only one marked. */
+.details .line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  scroll-margin: 24px;
+}
+
+.details .line--interim .line__text {
+  color: var(--lfp-ink-3);
+}
+
+.details .line--claimed {
+  border-left-color: var(--tone, var(--lfp-line));
+}
+
+.details .line--active {
+  background: color-mix(in srgb, var(--lfp-warm) 70%, transparent);
+}
+
+.line__avatar {
+  display: none;
+}
+
+.line__meta {
+  grid-column: 1;
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  font-size: 0.66rem;
+  line-height: 1.5;
+}
+
+.line__clock {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--lfp-ink-3);
+}
+
+.line__speaker {
+  font-weight: 600;
+  color: var(--lfp-ink-3);
+}
+
+.line__text {
+  grid-column: 2;
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  color: var(--lfp-ink);
+  overflow-wrap: anywhere;
+}
+
+/* Which claim a line produced, and the verdict that line received. */
+.line__flag {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 3px;
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  color: var(--tone, var(--lfp-ink-3));
+}
+
+.line__flagGlyph {
+  font-size: 0.66rem;
+}
+
+.line__live {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 0.66rem;
+  color: var(--lfp-ink-3);
+}
+
+.line__live::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--lfp-red);
+  animation: dash-pulse 1.4s var(--lfp-ease) infinite;
+}
+
+/* Segments from an ingestion report, which arrive without speaker turns. A
+   timeline, with no card per line. */
+.segments {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.segment {
+  display: grid;
+  grid-template-columns: 3.4rem 5.6rem minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 5px 0;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.segment + .segment {
+  border-top: 1px solid color-mix(in srgb, var(--lfp-line-soft) 60%, transparent);
+}
+
+.segment__clock {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.67rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--lfp-ink-3);
+}
+
+.segment__speaker {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.73rem;
+  font-weight: 550;
+  color: var(--lfp-ink-2);
+}
+
+.segment__text {
+  color: var(--lfp-ink);
+  overflow-wrap: anywhere;
+}
+
+/* ================================================================ panels == */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 13px;
+  border: 0;
+  border-left: 2px solid var(--lfp-red);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--lfp-red-soft) 14%, transparent);
+}
+
+.panel__title {
+  display: none;
+}
+
+.alert {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 0;
+  border-left: 2px solid var(--lfp-red);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--lfp-red-soft) 14%, transparent);
+}
+
+.alert--fault {
+  border-left-color: var(--lfp-yellow);
+  background: color-mix(in srgb, var(--lfp-yellow-soft) 16%, transparent);
+}
+
+.alert--fatal {
+  border-left-color: var(--dash-false);
+}
+
+.alert__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.alert__icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--lfp-red);
+}
+
+.alert__code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--lfp-red);
+}
+
+.alert--fault .alert__code {
+  color: color-mix(in srgb, var(--lfp-yellow) 72%, var(--lfp-ink));
+}
+
+.alert__message {
+  margin: 0;
+  font-size: 0.83rem;
+  line-height: 1.55;
+  color: var(--lfp-ink);
+  overflow-wrap: anywhere;
+}
+
+.errors {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tech {
+  border-top: 1px solid var(--lfp-line-soft);
+  padding-top: 5px;
+}
+
+.tech__summary {
+  cursor: pointer;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--lfp-ink-3);
+  list-style: none;
+}
+
+.tech__summary::-webkit-details-marker {
+  display: none;
+}
+
+.tech__summary::before {
+  content: '\203A';
+  display: inline-block;
+  margin-right: 5px;
+  transition: transform 180ms var(--lfp-ease);
+}
+
+.tech[open] .tech__summary::before {
+  transform: rotate(90deg);
+}
+
+.tech__body {
+  margin-top: 5px;
+}
+
+.tech__pre {
+  max-height: 11rem;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--lfp-line-soft);
+  border-radius: 8px;
+  background: var(--lfp-white);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--lfp-ink-2);
+}
+
+/* ============================================================ ingestion === */
+/* The standalone row, kept working for the ingestion surface. The dashboard
+   itself reaches these same operations through the composer. */
+
+.lfp-dash .ingestion-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lfp-dash .ingestion-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.lfp-dash .controls__group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.lfp-dash .button {
+  display: inline-flex;
+  flex-direction: row;
+  gap: 6px;
+  align-items: center;
+  padding: 7px 13px;
+  border: 1px solid var(--lfp-line);
+  border-radius: 999px;
+  background: var(--lfp-white);
+  color: var(--lfp-ink-2);
+  font-size: 0.79rem;
+  font-weight: 550;
+  white-space: nowrap;
+  transition: background 160ms var(--lfp-ease), border-color 160ms var(--lfp-ease),
+    color 160ms var(--lfp-ease);
+}
+
+.lfp-dash .button:hover:not(:disabled) {
+  background: var(--lfp-warm);
+  border-color: var(--lfp-ink-3);
+  color: var(--lfp-ink);
+}
+
+.lfp-dash .button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.lfp-dash .button--small {
+  padding: 4px 10px;
+  font-size: 0.72rem;
+}
+
+.lfp-dash .button--primary {
+  background: var(--lfp-ink);
+  border-color: var(--lfp-ink);
+  color: var(--lfp-paper-text);
+}
+
+.lfp-dash .button--danger {
+  border-color: color-mix(in srgb, var(--lfp-red) 34%, var(--lfp-line));
+  color: var(--lfp-red);
+}
+
+.lfp-dash .ingestion-upload--video,
+.lfp-dash .ingestion-upload--audio {
+  border-color: color-mix(in srgb, var(--dash-media) 34%, var(--lfp-line));
+  background: color-mix(in srgb, var(--lfp-orange-soft) 18%, var(--lfp-white));
+  color: color-mix(in srgb, var(--dash-media) 68%, var(--lfp-ink));
+}
+
+.lfp-dash .ingestion-url {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 1 1 15rem;
+  min-width: 0;
+}
+
+.lfp-dash .ingestion-url-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 13px;
+  border: 1px solid var(--lfp-line);
+  border-radius: 999px;
+  background: var(--lfp-white);
+  color: var(--lfp-ink);
+  font-family: inherit;
+  font-size: 0.82rem;
+}
+
+.lfp-dash .ingestion-url-go {
+  border-color: color-mix(in srgb, var(--dash-link) 30%, var(--lfp-line));
+  color: color-mix(in srgb, var(--dash-link) 58%, var(--lfp-ink));
+}
+
+.lfp-dash .ingestion-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 11px;
+  border-left: 2px solid var(--dash-media);
+  background: color-mix(in srgb, var(--lfp-orange-soft) 12%, transparent);
+}
+
+.lfp-dash .ingestion-progress__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.lfp-dash .ingestion-progress__file {
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.7rem;
+  color: var(--lfp-ink-2);
+}
+
+.lfp-dash .ingestion-progress__status,
+.lfp-dash .ingestion-progress__success {
+  font-size: 0.78rem;
+  color: var(--lfp-ink);
+}
+
+.lfp-dash .ingestion-progress__error {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.78rem;
+  color: var(--lfp-red);
+}
+
+.lfp-dash .ingestion-progress__errorText {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* =========================================================== responsive === */
+
+/* Tablet: a narrower rail. The conversation is unchanged, because the reader's
+   attention is on the thread, not on how wide the history list is. */
+@media (max-width: 1180px) {
+  .lfp-dash {
+    --dash-side: 262px;
+  }
+}
+
+/* Below this the rail cannot coexist with a readable thread, so it becomes an
+   overlay and the header grows the control that opens it. */
+@media (max-width: 1023px) {
+  .lfp-dash {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .side {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 60;
+    width: min(300px, 84vw);
+    transform: translateX(-102%);
+    box-shadow: 0 24px 70px color-mix(in srgb, var(--lfp-night) 30%, transparent);
+    transition: transform 240ms var(--lfp-ease);
+  }
+
+  .side--open {
+    transform: none;
+  }
+
+  .side__close {
+    display: grid;
+  }
+
+  .scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+  }
+
+  .scrim--on {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .head__menuBtn {
+    display: grid;
+  }
+
+  .thread {
+    padding-inline: 20px;
+  }
+}
+
+@media (max-width: 860px) {
+  .lfp-dash {
+    font-size: 14.5px;
+  }
+
+  .thread {
+    padding: 28px 16px 8px;
+  }
+
+  .dock {
+    padding-inline: 16px;
+  }
+
+  .thread__inner {
+    gap: 34px;
+  }
+
+  .bubble {
+    max-width: 88%;
+  }
+}
+
+/* Phone: the pipeline stacks into a short vertical list, the pills wrap, and the
+   composer keeps both of its affordances within reach of a thumb. */
+@media (max-width: 640px) {
+  .pipe__list {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  .pipe__step {
+    border-radius: 0;
+    padding: 3px 0 3px 2px;
+  }
+
+  .pipe__link {
+    width: 1px;
+    height: 8px;
+    margin: 0 0 0 10px;
+  }
+
+  .head {
+    padding: 10px 14px;
+  }
+
+  .head__sub {
+    display: none;
+  }
+
+  .head__btn {
+    padding: 6px 8px;
+  }
+
+  .thread {
+    padding: 22px 14px 8px;
+  }
+
+  .thread__inner {
+    gap: 30px;
+  }
+
+  .segment {
+    grid-template-columns: 3.2rem minmax(0, 1fr);
+  }
+
+  .segment__text {
+    grid-column: 1 / -1;
+  }
+
+  .composer {
+    border-radius: 14px;
+  }
+
+  .composer__bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .composer__tools {
+    justify-content: space-between;
+  }
+
+  .composer__actions {
+    justify-content: flex-end;
+  }
+
+  .composer__hint {
+    display: none;
+  }
+
+  .composer__send {
+    width: 100%;
+    border-radius: 999px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lfp-dash *,
+  .lfp-dash *::before,
+  .lfp-dash *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

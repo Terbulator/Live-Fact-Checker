@@ -36,3 +36,33 @@ export function useNow(enabled: boolean): number {
 
   return now
 }
+
+/**
+ * A slow clock, for wording that ages in minutes rather than milliseconds.
+ *
+ * "Started 2 minutes ago" must stay true without re-rendering the conversation
+ * twice a second to achieve it, so this ticks on a coarse interval and stops
+ * entirely when the page is hidden.
+ */
+export function useTicker(intervalMs: number, enabled = true): number {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!enabled) return
+
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), intervalMs)
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') setNow(Date.now())
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [enabled, intervalMs])
+
+  return now
+}

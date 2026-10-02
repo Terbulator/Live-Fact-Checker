@@ -51,7 +51,7 @@ describe('the production dashboard starts empty', () => {
   })
 
   it('renders the transcript panel with no sample transcript', () => {
-    render(<TranscriptPanel lines={initialLiveView.transcripts} />)
+    render(<TranscriptPanel lines={initialLiveView.transcripts} activeKey={null} />)
 
     expect(screen.queryByText(/India won/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/Eiffel/i)).not.toBeInTheDocument()

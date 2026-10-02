@@ -166,12 +166,12 @@ describe('VideoClaimList', () => {
     render(<VideoClaimList results={[result()]} />)
 
     expect(screen.getByText(/Water boils at 100 °C\./)).toBeInTheDocument()
-    // The citation link is labelled with the source's host, not its title, so
-    // the accessible name is the domain.
-    expect(screen.getByRole('link', { name: /example\.com/ })).toHaveAttribute(
-      'href',
-      'https://example.com/water',
-    )
+    // The citation is named by its title when the provider supplied one, with
+    // the host shown beside it. The host alone was the old fallback, and it is
+    // still what an untitled source gets.
+    const link = screen.getByRole('link', { name: /boiling point/i })
+    expect(link).toHaveAttribute('href', 'https://example.com/water')
+    expect(screen.getByText('example.com')).toBeInTheDocument()
   })
 
   it('shows the provider confidence when one was reported', () => {

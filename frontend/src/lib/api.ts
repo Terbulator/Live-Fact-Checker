@@ -12,9 +12,12 @@
 
 import { BACKEND_URL } from './config'
 import type {
+  ClaimEvent,
   EvidenceSource,
   HealthResponse,
+  PipelineCounts,
   SessionState,
+  VerificationEvent,
   Verdict,
 } from '../types/events'
 
@@ -261,4 +264,49 @@ export function ingestVideoUrl(
 /** Service health, wired engines and credential *presence* (never values). */
 export function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>('/health')
+}
+
+/** What the caller supplies when posting a claim that was typed, not spoken. */
+export interface ClaimSubmission {
+  claimId: string
+  sessionId: string
+  claim: string
+  /** Offset into the session, in seconds, used to place the claim in time. */
+  timestamp: number
+  /** Label shown as the speaker of the claim. Null when there is no speaker. */
+  speaker?: string | null
+}
+
+/** Result of `POST /events/claim`. */
+export interface ClaimAcceptedResponse {
+  accepted: boolean
+  sessionId: string
+  claim: ClaimEvent
+  counts: PipelineCounts
+  verifications: VerificationEvent[]
+  idempotent: boolean
+}
+
+/**
+ * Post a claim that did not come from speech, and have it verified.
+ *
+ * This is the composer path for a typed claim: it uses the backend's existing
+ * `POST /events/claim` ingress, which broadcasts the claim and runs the same
+ * verification pipeline a spoken claim goes through. Nothing here re-implements
+ * extraction or verification -- the only frontend responsibility is minting a
+ * claim id, because the backend rejects a repeat within a session.
+ */
+export function submitClaim(submission: ClaimSubmission): Promise<ClaimAcceptedResponse> {
+  return request<ClaimAcceptedResponse>('/events/claim', {
+    method: 'POST',
+    body: JSON.stringify({
+      type: 'claim',
+      claimId: submission.claimId,
+      sessionId: submission.sessionId,
+      speaker: submission.speaker ?? 'Speaker 1',
+      timestamp: submission.timestamp,
+      claim: submission.claim,
+      claimType: 'unspecified',
+    }),
+  })
 }

@@ -28,8 +28,16 @@ export interface UseSessionResult {
   view: LiveView
   /** Transport-level or API failure, distinct from backend `error` events. */
   fault: string | null
-  /** Start a session. `demo` replays the backend's scripted mock pipeline. */
-  start: (options?: { demo?: boolean }) => Promise<void>
+  /**
+   * Start a session, returning it so a caller can act on it immediately.
+   *
+   * `demo` replays the backend's scripted mock pipeline. The returned session is
+   * also held in state, but a caller that needs the id synchronously -- the
+   * composer posting a typed claim the moment the session exists -- cannot wait
+   * for the next render, so the created session is handed back directly. `null`
+   * means the start failed and the fault carries the reason.
+   */
+  start: (options?: { demo?: boolean }) => Promise<SessionState | null>
   /** Stop the session and close the socket. */
   stop: () => Promise<void>
   /** Reopen the socket against the same session. */
@@ -80,7 +88,7 @@ export function useSession(): UseSessionResult {
   })
 
   const start = useCallback(
-    async (options?: { demo?: boolean }) => {
+    async (options?: { demo?: boolean }): Promise<SessionState | null> => {
       setPhase('starting')
       setFault(null)
       // Clear the previous session's transcript, claims and verdicts before the
@@ -92,10 +100,12 @@ export function useSession(): UseSessionResult {
         const created = await startSession(options?.demo ?? false)
         setSession(created)
         setPhase('active')
+        return created
       } catch (error) {
         setPhase('idle')
         setSession(null)
         setFault(describe(error))
+        return null
       }
     },
     [],

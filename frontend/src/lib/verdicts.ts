@@ -12,8 +12,16 @@
 
 import type { Verdict } from '../types/events'
 
-/** Semantic tone, mapped to a colour and a set of styles in `index.css`. */
-export type VerdictTone = 'supported' | 'refuted' | 'unknown' | 'checking'
+/**
+ * Semantic tone, mapped to a colour and a set of styles in `dashboard.css`.
+ *
+ * `ambiguous` is separate from `unknown` on purpose. `UNVERIFIABLE` means the
+ * evidence is missing or weak -- an attention state -- while `AMBIGUOUS` means
+ * the evidence supports more than one reading of the claim, which is a finding
+ * in its own right. Collapsing them into one colour told a reader that a
+ * genuinely contested claim was simply unproven.
+ */
+export type VerdictTone = 'supported' | 'refuted' | 'unknown' | 'ambiguous' | 'checking'
 
 export interface VerdictDescriptor {
   label: string
@@ -52,7 +60,7 @@ export const VERDICT_DESCRIPTORS: Record<Verdict, VerdictDescriptor> = {
   AMBIGUOUS: {
     label: 'Ambiguous',
     short: 'AMBIGUOUS',
-    tone: 'unknown',
+    tone: 'ambiguous',
     description: 'Evidence supports more than one reading of the claim.',
     glyph: '~',
   },

@@ -11,6 +11,8 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import './index.css'
 import './marketing.css'
+import './auth.css'
+import './dashboard.css'
 
 const container = document.getElementById('root')
 

@@ -141,6 +141,12 @@ function VideoClaimRow({ result }: { result: VideoClaimResult }) {
                     ) : (
                       <span className="vclaim__sourceText">{entry.url}</span>
                     )}
+                    {/* The host stays visible beside the title: a reader deciding
+                        whether to trust a citation needs to see who published it,
+                        not only what the page is called. */}
+                    {entry.title !== null && (
+                      <span className="vclaim__sourceDomain">{sourceDomain(entry.url)}</span>
+                    )}
                   </span>
                   {entry.snippet !== null && (
                     <p className="vclaim__snippet">{entry.snippet}</p>

@@ -1,0 +1,946 @@
+/* =============================================================================
+   Live Fact Checker — /login
+   -----------------------------------------------------------------------------
+   Scoped to `.lfp-auth`, mounted on a `.lfp-root.lfp-bg--black` element, so the
+   page inherits the landing site's whole palette (`--lfp-black`, `--lfp-ui-*`,
+   `--lfp-lime`, `--lfp-green`, `--lfp-paper-text-*`) through the same dark band
+   the CTA and footer use. Every tint below is `color-mix(... , transparent)`
+   against one of those tokens. The one literal is a pure-black shadow alpha.
+
+   THE COMPOSITION
+   A three-column scene — pitch, card, capability stack — between two thin
+   chrome bars, over a full-viewport canvas. The canvas paints the black ground
+   and the ambient washes itself, so this file only has to keep text legible on
+   top of it:
+
+     canvas (.lfp-auth__field)  the energy field. Fixed, `pointer-events: none`,
+                                behind everything. Never sized or coloured here.
+     .lfp-auth__scene           z-index 1, the only thing the pointer is over.
+     .lfp-auth__card            translucent charcoal with a backdrop blur, so the
+                                energy arrives already diffused and reads as
+                                *behind* the form rather than across it.
+
+   The card's edge illumination is a single low-alpha lime inset shadow, not a
+   border: it reacts to the field passing behind without becoming a glowing box.
+   ========================================================================== */
+
+/* ============================================================== the page === */
+
+.lfp-auth {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  min-height: 100vh;
+  min-height: 100dvh;
+  flex-direction: column;
+  background: var(--lfp-black);
+  color: var(--lfp-text);
+  /* `clip` and not `hidden`: the ambient washes run past the left and right
+     edges and must not add a horizontal scrollbar, but a short window still has
+     to be able to scroll the card. `hidden` would seal the overflow away. */
+  overflow-x: clip;
+}
+
+/* The energy field. Sized and positioned entirely in JS, so a resize costs one
+   repaint rather than a style recalculation per element. */
+.lfp-auth__energy {
+  position: fixed;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* ================================================================ chrome === */
+
+.lfp-auth__chrome {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 20px;
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+  padding: 22px clamp(20px, 4vw, 44px);
+  color: var(--lfp-text-2);
+  font-size: 0.78rem;
+}
+
+.lfp-auth__chrome--bottom {
+  border-top: 1px solid color-mix(in srgb, var(--lfp-card-line) 70%, transparent);
+  color: var(--lfp-text-3);
+}
+
+.lfp-auth__chrome--bottom nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+
+.lfp-auth__chrome--bottom a {
+  color: var(--lfp-text-2);
+  transition: color 160ms var(--lfp-ease);
+}
+
+.lfp-auth__chrome--bottom a:hover { color: var(--lfp-lime); text-decoration: none; }
+.lfp-auth__chrome--bottom a:focus-visible {
+  outline: 2px solid var(--lfp-lime);
+  outline-offset: 3px;
+  border-radius: 5px;
+}
+
+/* Routes that do not exist are plain text, never a link that goes nowhere. */
+.lfp-auth__chrome--bottom [aria-disabled='true'] { color: var(--lfp-text-3); }
+
+.lfp-auth__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--lfp-text);
+  transition: opacity 160ms var(--lfp-ease);
+}
+
+.lfp-auth__brand:hover { opacity: 0.82; text-decoration: none; }
+.lfp-auth__brand:focus-visible { outline: 2px solid var(--lfp-lime); outline-offset: 4px; }
+
+.lfp-auth__secure {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 13px;
+  border: 1px solid var(--lfp-card-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lfp-ui-outer) 55%, transparent);
+  color: var(--lfp-text-2);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.lfp-auth__secure svg { color: var(--lfp-lime); }
+
+/* ================================================================= scene === */
+
+.lfp-auth__scene {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 452px) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(24px, 3.4vw, 56px);
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+  padding: clamp(18px, 3vh, 40px) clamp(20px, 4vw, 44px);
+}
+
+/* ================================================== left: product message === */
+
+.lfp-auth__pitch {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  max-width: 330px;
+  justify-self: end;
+}
+
+.lfp-auth__eyebrow {
+  margin-bottom: 0;
+  color: var(--lfp-a);
+}
+
+.lfp-auth__headline {
+  font-size: clamp(2.3rem, 3.5vw, 3.5rem);
+  font-weight: 600;
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+  color: var(--lfp-text);
+}
+
+/* The accent is a word, not a glow. Same rule the landing hero uses at display
+   size: colour the word, never wrap it in light. */
+.lfp-auth__headlineAccent { color: var(--lfp-lime); }
+
+.lfp-auth__lede {
+  max-width: 30ch;
+  font-size: 0.95rem;
+  line-height: 1.62;
+  color: var(--lfp-text-2);
+}
+
+.lfp-auth__live {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  margin-top: 6px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--lfp-a) 22%, var(--lfp-card-line));
+  border-radius: var(--lfp-radius-sm);
+  background: color-mix(in srgb, var(--lfp-a-soft) 55%, transparent);
+}
+
+.lfp-auth__liveIcon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--lfp-a) 16%, transparent);
+  color: var(--lfp-a);
+}
+
+.lfp-auth__live strong {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--lfp-text);
+}
+
+.lfp-auth__live p {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--lfp-text-2);
+}
+
+/* ================================================ right: capability stack === */
+
+.lfp-auth__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 320px;
+  justify-self: start;
+}
+
+/* The accent family comes from `accentClass()` in tone.ts, so `--lfp-a` and
+   `--lfp-a-soft` are already set for this card by the landing stylesheet. These
+   cards only describe shape and spacing. */
+.lfp-auth__feature {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 15px 17px;
+  border: 1px solid color-mix(in srgb, var(--lfp-a) 18%, var(--lfp-card-line));
+  border-radius: var(--lfp-radius-sm);
+  background: color-mix(in srgb, var(--lfp-card-bg) 52%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: border-color 200ms var(--lfp-ease), background 200ms var(--lfp-ease);
+}
+
+.lfp-auth__feature:hover {
+  border-color: color-mix(in srgb, var(--lfp-a) 40%, var(--lfp-card-line));
+  background: color-mix(in srgb, var(--lfp-card-bg) 72%, transparent);
+}
+
+.lfp-auth__featureIcon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--lfp-a) 15%, transparent);
+  color: var(--lfp-a);
+}
+
+.lfp-auth__feature h3 {
+  font-size: 0.87rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--lfp-text);
+}
+
+.lfp-auth__feature p {
+  margin-top: 3px;
+  font-size: 0.81rem;
+  line-height: 1.5;
+  color: var(--lfp-text-2);
+}
+
+/* ================================================================== card === */
+
+.lfp-auth__card {
+  position: relative;
+  width: 100%;
+  padding: clamp(26px, 2.6vw, 34px);
+  border: 1px solid color-mix(in srgb, var(--lfp-paper-text) 8%, transparent);
+  border-radius: var(--lfp-radius-lg);
+  /* Translucent, so the energy field arrives already diffused by the blur. */
+  background: color-mix(in srgb, var(--lfp-card-bg) 70%, transparent);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  box-shadow:
+    /* the edge reaction: a lime wash, not a border, so the card picks up the
+       field passing behind it without ever becoming a glowing box */
+    inset 0 1px 0 color-mix(in srgb, var(--lfp-lime) 16%, transparent),
+    inset 0 0 90px -34px color-mix(in srgb, var(--lfp-lime) 44%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--lfp-black) 40%, transparent),
+    0 40px 90px -34px rgba(0, 0, 0, 0.86);
+}
+
+.lfp-auth__cardBrand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--lfp-text-2);
+}
+
+.lfp-auth__cardBrand .lfp-brand__mark { width: 17px; height: 17px; border-radius: 5px; }
+
+.lfp-auth__title {
+  margin-top: 22px;
+  font-size: clamp(1.5rem, 2.2vw, 1.8rem);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  color: var(--lfp-text);
+}
+
+.lfp-auth__sub {
+  margin-top: 8px;
+  font-size: 0.89rem;
+  line-height: 1.58;
+  color: var(--lfp-text-2);
+}
+
+/* ================================================================ notice === */
+/* The form has no authentication service behind it, so the page says so. Kept
+   quiet: a lime rule and a dim paragraph, never a red alert. */
+
+.lfp-auth__notice {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 11px 13px;
+  border: 1px solid var(--lfp-card-line);
+  border-left: 2px solid color-mix(in srgb, var(--lfp-lime) 55%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--lfp-ui-outer) 62%, transparent);
+  font-size: 0.79rem;
+  line-height: 1.52;
+  color: var(--lfp-text-2);
+}
+
+.lfp-auth__notice strong {
+  display: block;
+  margin-bottom: 2px;
+  font-weight: 600;
+  color: var(--lfp-text);
+}
+
+.lfp-auth__noticeIcon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--lfp-lime);
+}
+
+/* ================================================================== form === */
+
+.lfp-auth__field + .lfp-auth__field { margin-top: 15px; }
+
+/*
+ * The label row and its inert "Forgot password?" caption were removed with the
+ * third-party sign-in buttons. Password recovery is a real Supabase flow, and
+ * offering it without wiring it would have been a link that went nowhere — the
+ * old page only got away with it because the whole form was disabled. When it
+ * is built, the row comes back as a real link with a real handler.
+ */
+
+.lfp-auth__label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+  color: var(--lfp-text-2);
+}
+
+.lfp-auth__control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 0 13px;
+  border: 1px solid var(--lfp-ui-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--lfp-ui-outer) 82%, transparent);
+  transition:
+    border-color 180ms var(--lfp-ease),
+    background 180ms var(--lfp-ease),
+    box-shadow 240ms var(--lfp-ease);
+}
+
+.lfp-auth__control:hover {
+  border-color: color-mix(in srgb, var(--lfp-paper-text-3) 60%, var(--lfp-ui-line));
+}
+
+/* Focus lives on the control, not the input, so the ring wraps the whole field
+   including its icon and the reveal button. */
+.lfp-auth__control:focus-within {
+  border-color: color-mix(in srgb, var(--lfp-lime) 72%, transparent);
+  background: color-mix(in srgb, var(--lfp-ui-outer) 92%, transparent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--lfp-lime) 13%, transparent),
+    0 14px 34px -14px color-mix(in srgb, var(--lfp-lime) 46%, transparent);
+}
+
+/* The focus indicator is a box-shadow, which forced-colours mode does not paint.
+   Fall back to a real outline there, or the fields lose their focus ring for
+   anyone running a high-contrast theme. */
+@media (forced-colors: active) {
+  .lfp-auth__control:focus-within {
+    border-color: Highlight;
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+}
+
+.lfp-auth__icon {
+  flex-shrink: 0;
+  color: var(--lfp-text-3);
+  transition: color 180ms var(--lfp-ease);
+}
+
+.lfp-auth__control:focus-within .lfp-auth__icon { color: var(--lfp-lime); }
+
+.lfp-auth__input {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 0;
+  border: 0;
+  background: transparent;
+  color: var(--lfp-text);
+  font: inherit;
+  font-size: 0.92rem;
+  /* The visible focus ring is the control's `:focus-within` box-shadow. */
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.lfp-auth__input::placeholder { color: var(--lfp-text-3); }
+
+.lfp-auth__reveal {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: -5px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--lfp-text-3);
+  cursor: pointer;
+  transition: color 160ms var(--lfp-ease), background 160ms var(--lfp-ease);
+}
+
+.lfp-auth__reveal:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--lfp-paper-text) 8%, transparent);
+  color: var(--lfp-text);
+}
+
+.lfp-auth__reveal:focus-visible { outline: 2px solid var(--lfp-lime); outline-offset: 1px; }
+
+/* Fields dim while a request is in flight. The controls stay enabled-looking
+   rather than greyed to nothing, because they are only briefly unavailable and
+   a form that visibly freezes mid-submit is the thing this state is meant to
+   avoid. */
+.lfp-auth__control:has(:disabled) { opacity: 0.62; }
+.lfp-auth__reveal:disabled { cursor: not-allowed; }
+
+/* ================================================================ button === */
+
+.lfp-auth__submit {
+  width: 100%;
+  min-height: 48px;
+  gap: 9px;
+  margin-top: 22px;
+  font-size: 0.95rem;
+  box-shadow: 0 12px 32px -16px color-mix(in srgb, var(--lfp-lime) 72%, transparent);
+}
+
+.lfp-auth__submit:hover:not(:disabled) {
+  box-shadow: 0 18px 42px -14px color-mix(in srgb, var(--lfp-lime) 82%, transparent);
+}
+
+.lfp-auth__submit:active:not(:disabled) { transform: translateY(1px) scale(0.995); }
+
+.lfp-auth__submit:focus-visible { outline: 2px solid var(--lfp-lime); outline-offset: 3px; }
+
+/* A dimmed lime pill reads as broken olive, so the disabled state drops to a
+   soft sage surface and swaps the label to the body tone: still clearly the
+   primary action, still honestly unavailable, and still above the 4.5:1
+   contrast floor. Reached only while submitting, or when no project is
+   configured. */
+.lfp-auth__submit:disabled {
+  cursor: not-allowed;
+  background: color-mix(in srgb, var(--lfp-lime) 20%, var(--lfp-ui-elevated));
+  color: var(--lfp-text-2);
+  box-shadow: none;
+}
+
+/* ================================================================ footer === */
+
+.lfp-auth__footer {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--lfp-card-line);
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--lfp-text-2);
+}
+
+.lfp-auth__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 600;
+  color: var(--lfp-lime);
+}
+
+.lfp-auth__link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.lfp-auth__link:focus-visible { outline: 2px solid var(--lfp-lime); outline-offset: 3px; border-radius: 4px; }
+
+/* =========================================================== responsive ==== */
+
+/* Tablet: the capability stack is the first thing to go — it is the most
+   decorative and the least load-bearing of the two side columns. The card also
+   gives a little width back, so it stops sitting against the right edge. */
+@media (max-width: 1199px) {
+  .lfp-auth__scene {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 424px);
+  }
+  .lfp-auth__stack { display: none; }
+}
+
+/* Below this the pitch stops earning its space: the card should own a small
+   screen outright rather than share it with headline copy. */
+@media (max-width: 899px) {
+  .lfp-auth__scene {
+    grid-template-columns: minmax(0, 424px);
+    justify-content: center;
+  }
+  .lfp-auth__pitch { display: none; }
+  .lfp-auth__chrome--top { padding-bottom: 6px; }
+  .lfp-auth__chrome--bottom { flex-wrap: wrap; gap: 10px 18px; }
+  /* A card this size owns a phone screen, so it has to give the field back some
+     ground or there is nothing left to see behind it. The blur still keeps the
+     energy diffuse, which is what protects the contrast. */
+  .lfp-auth__card { background: color-mix(in srgb, var(--lfp-card-bg) 66%, transparent); }
+}
+
+@media (max-width: 520px) {
+  .lfp-auth__card {
+    padding: 24px 20px;
+    border-radius: var(--lfp-radius);
+  }
+  .lfp-auth__title { margin-top: 18px; }
+}
+
+/* Short viewports: the card runs long and a centred column would push its
+   footer below the fold, so tighten the surrounding space instead. */
+@media (max-height: 860px) {
+  .lfp-auth__chrome { padding-block: 16px; }
+  .lfp-auth__scene { padding-block: 14px; }
+}
+
+@media (max-height: 760px) {
+  .lfp-auth__chrome { padding-block: 12px; }
+  .lfp-auth__scene { padding-block: 10px; }
+}
+
+/* ================================================================ motion ==== */
+/* Both ambient fields check the preference themselves and drop to a single
+   painted frame; this only settles the CSS transitions the canvases have no part
+   in. */
+
+@media (prefers-reduced-motion: reduce) {
+  .lfp-auth__control,
+  .lfp-auth__icon,
+  .lfp-auth__submit,
+  .lfp-auth__brand,
+  .lfp-auth__link,
+  .lfp-auth__chrome--bottom a,
+  .lfp-auth__feature { transition-duration: 0.001ms; }
+}
+
+/* ============================================================================
+   /signup
+
+   The signup page reuses the whole scene above rather than a parallel one: the
+   same shell, chrome, pitch, card, fields and CTA, so the two pages are visibly
+   one product. What is added here is only what signup actually needs and login
+   does not — a strength meter, a confirmation field with its own state, an
+   inline error row, and a second ambient layer.
+
+   Nothing below introduces a colour. Every value is a `--lfp-*` token or a
+   `color-mix()` against one, for the same reason the rest of this file works
+   that way: the palette belongs to `marketing.css`.
+   ========================================================================== */
+
+/* The signal's canvas host. Same contract as `.lfp-auth__energy` — fixed,
+   behind everything, sized entirely in JS so a resize is one repaint rather
+   than a style recalculation, and never a target for a click. */
+.lfp-auth__signal {
+  position: fixed;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* The capability rail on a signup card carries three lines, so it is a little
+   quieter than the login page's: smaller icon, tighter type. It is still three
+   real capabilities, not decoration. */
+.lfp-auth__stack--compact {
+  max-width: 286px;
+  gap: 10px;
+}
+
+.lfp-auth__stack--compact .lfp-auth__feature {
+  gap: 11px;
+  padding: 12px 14px;
+}
+
+.lfp-auth__stack--compact .lfp-auth__featureIcon {
+  width: 27px;
+  height: 27px;
+}
+
+.lfp-auth__stack--compact .lfp-auth__feature h3 {
+  font-size: 0.83rem;
+}
+
+.lfp-auth__stack--compact .lfp-auth__feature p {
+  font-size: 0.78rem;
+}
+
+/* --------------------------------------------------------------- notices -- */
+/* The shared notice was written for a quiet explanatory paragraph, and it is
+   still that. These two are states something went wrong or is not possible, so
+   they are allowed a red or amber rule and an amber wash — loud enough to be
+   noticed, never a full-bleed alert that competes with the card. */
+
+.lfp-auth__notice--error {
+  border-left-color: color-mix(in srgb, var(--lfp-v-false) 65%, transparent);
+  background: color-mix(in srgb, var(--lfp-v-false) 9%, var(--lfp-ui-outer));
+}
+
+.lfp-auth__notice--error .lfp-auth__noticeIcon {
+  color: var(--lfp-v-false);
+}
+
+.lfp-auth__notice--warn {
+  border-left-color: color-mix(in srgb, var(--lfp-v-unverifiable) 60%, transparent);
+  background: color-mix(in srgb, var(--lfp-v-unverifiable) 8%, var(--lfp-ui-outer));
+}
+
+.lfp-auth__notice--warn .lfp-auth__noticeIcon {
+  color: var(--lfp-v-unverifiable);
+}
+
+/* ---------------------------------------------------------------- fields -- */
+/* Three control states beyond the shared one, and each pairs a colour with
+   something else: an error gets an icon and a message, a match gets a tick. A
+   border colour on its own is not an accessible signal. */
+
+.lfp-auth__control--error {
+  border-color: color-mix(in srgb, var(--lfp-v-false) 52%, transparent);
+}
+
+.lfp-auth__control--error:focus-within {
+  border-color: color-mix(in srgb, var(--lfp-v-false) 72%, transparent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--lfp-v-false) 14%, transparent),
+    0 14px 34px -14px color-mix(in srgb, var(--lfp-v-false) 40%, transparent);
+}
+
+.lfp-auth__control--error:focus-within .lfp-auth__icon {
+  color: var(--lfp-v-false);
+}
+
+.lfp-auth__control--valid {
+  border-color: color-mix(in srgb, var(--lfp-lime) 34%, var(--lfp-ui-line));
+}
+
+/* The inline message under a field. Reserved space is not reserved — the
+   message is in the flow, so nothing shifts when it appears beyond the one
+   line it occupies, and it is never announced twice because the field also
+   carries `aria-describedby`. */
+.lfp-signup__error {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 7px 0 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--lfp-v-false);
+}
+
+.lfp-signup__error svg {
+  flex-shrink: 0;
+}
+
+/* The confirmation field's live hint. Same slot as the error above, so the
+   control does not move when a password starts matching. */
+.lfp-signup__hint {
+  min-height: 1.15em;
+  margin: 7px 0 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--lfp-text-3);
+}
+
+.lfp-signup__hint--good {
+  color: var(--lfp-lime);
+}
+
+.lfp-signup__hint--bad {
+  color: var(--lfp-v-false);
+}
+
+.lfp-signup__confirm--match .lfp-auth__icon {
+  color: var(--lfp-lime);
+}
+
+.lfp-signup__confirm--mismatch {
+  border-color: color-mix(in srgb, var(--lfp-v-false) 46%, transparent);
+}
+
+.lfp-signup__confirm--mismatch .lfp-signup__hint {
+  color: var(--lfp-v-false);
+}.lfp-signup__confirmTick {
+  flex-shrink: 0;
+  color: var(--lfp-lime);
+  animation: lfp-signup-tick 260ms var(--lfp-ease) both;
+}
+
+@keyframes lfp-signup-tick {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ---------------------------------------------------------------- meter --- */
+/* Three bars and the rules behind them.
+ *
+ * The bars are the glance. The list is the truth: four named checks, each with
+ * a tick, so the reader can see exactly what their password does and does not
+ * satisfy rather than being handed a number with no explanation. There is no
+ * entropy score here on purpose — a score computed from four character tests
+ * is a guess, and this codebase does not display guesses as measurements. */
+
+.lfp-signup__meter {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 9px;
+}
+
+.lfp-signup__meterBars {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  padding-top: 4px;
+}
+
+.lfp-signup__meterBar {
+  width: 20px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lfp-paper-text) 12%, transparent);
+  transition: background 220ms var(--lfp-ease);
+}
+
+.lfp-signup__meterBar--on[data-level='1'] {
+  background: color-mix(in srgb, var(--lfp-v-unverifiable) 78%, transparent);
+}
+
+.lfp-signup__meterBar--on[data-level='2'] {
+  background: color-mix(in srgb, var(--lfp-lime) 66%, transparent);
+}
+
+.lfp-signup__meterBar--on[data-level='3'] {
+  background: var(--lfp-lime);
+}
+
+.lfp-signup__rules {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lfp-signup__rule {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  min-width: 0;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--lfp-text-3);
+}
+
+/* An unmet rule's tick stays in the layout at low contrast, so the list does
+   not reflow as rules are met. */
+.lfp-signup__ruleTick {
+  flex-shrink: 0;
+  opacity: 0.28;
+}
+
+.lfp-signup__rule--met {
+  color: var(--lfp-text-2);
+}
+
+.lfp-signup__rule--met .lfp-signup__ruleTick {
+  color: var(--lfp-lime);
+  opacity: 1;
+}
+
+/* --------------------------------------------------------------- submit --- */
+
+/* A small arc rather than a spinner: a spinner says "waiting on the network",
+   which is honest, but the brief asks for a verification mark and this reads as
+   one — a sweep, the same gesture as the signal completing its route. */
+.lfp-signup__spinner {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  border: 1.6px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: lfp-signup-spin 720ms linear infinite;
+}
+
+@keyframes lfp-signup-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.lfp-auth__submit--done {
+  background: var(--lfp-lime);
+}
+
+/* ---------------------------------------------- email confirmation state -- */
+/* Shown when the account was created but the project requires the address to
+   be confirmed first. It replaces the form rather than appearing above it: a
+   disabled form under a success message is a form that looks broken. */
+
+.lfp-signup__confirmState {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.lfp-signup__confirmIcon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-top: 22px;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--lfp-lime) 13%, transparent);
+  color: var(--lfp-lime);
+  animation: lfp-signup-tick 320ms var(--lfp-ease) both;
+}
+
+.lfp-signup__confirmState .lfp-auth__sub strong {
+  font-weight: 600;
+  color: var(--lfp-text);
+  overflow-wrap: anywhere;
+}
+
+.lfp-signup__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 18px 0 0;
+  padding-left: 20px;
+  font-size: 0.83rem;
+  line-height: 1.55;
+  color: var(--lfp-text-2);
+}
+
+.lfp-signup__steps li::marker {
+  color: var(--lfp-lime);
+  font-weight: 700;
+}
+
+.lfp-signup__confirmFooter {
+  width: 100%;
+}
+
+/* ----------------------------------------------------------- responsive --- */
+/* The scene's own ladder above already collapses the two side columns at 1199
+   and 899. Signup adds one more concern: its card is taller than login's, four
+   fields and a meter against two, so on a short viewport it needs its internal
+   spacing pulled in before anything is cut. */
+
+/* The meter is the first thing to go two-up, because its rules are also readable
+   as a single list and a squeezed two-column grid is worse than a stack. */
+@media (max-width: 420px) {
+  .lfp-signup__meter {
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .lfp-signup__rules {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A short window: the four fields and the meter have to fit without the footer
+   falling below the fold, so the gaps between fields and under controls shrink
+   rather than anything being hidden. */
+@media (max-height: 780px) {
+  .lfp-auth__field + .lfp-auth__field {
+    margin-top: 11px;
+  }
+
+  .lfp-auth__control {
+    min-height: 42px;
+  }
+
+  .lfp-auth__input {
+    padding: 9px 0;
+  }
+
+  .lfp-auth__submit {
+    margin-top: 16px;
+  }
+
+  .lfp-signup__rules {
+    gap: 2px 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lfp-signup__spinner,
+  .lfp-signup__confirmTick,
+  .lfp-signup__confirmIcon {
+    animation: none;
+  }
+
+  .lfp-signup__meterBar,
+  .lfp-auth__control,
+  .lfp-signup__rule {
+    transition-duration: 0.001ms;
+  }
+}

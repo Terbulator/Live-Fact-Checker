@@ -1,340 +1,165 @@
 /**
  * Ingestion controls for recorded media.
  *
- * Provides three additional input modes alongside the existing "Go Live":
- * - Upload Audio: MP3, WAV, M4A, etc.
- * - Upload Video: MP4, MOV, WebM, etc.
- * - Video URL: YouTube and direct video links
+ * The standalone row: audio file, video file and video link, each feeding the
+ * existing transcript -> claim -> verification pipeline.
  *
- * Each mode uploads/processes media and feeds the transcript into the
- * existing claim -> verification pipeline.
+ * The dashboard's composer owns the same three inputs, and both surfaces drive
+ * the identical `useMediaIngestion` state machine, so validation, session
+ * resolution and upload behaviour cannot diverge between them. This component is
+ * presentation over that hook: it renders buttons and a note, and reports
+ * progress, which is all it ever did.
+ *
+ * Accessible names are unchanged from the original controls, so assistive
+ * technology and the tests describe the same three actions wherever they are
+ * rendered.
  */
 
-import { useCallback, useRef, useState } from 'react'
-import {
-  ingestAudio,
-  ingestVideo,
-  ingestVideoUrl,
-  ApiError,
-  type IngestionResponse,
-} from '../lib/api'
-import { completionMessage } from '../lib/videoReport'
+import { useRef } from 'react'
+
+import { useMediaIngestion, createPreviewUrl } from '../hooks/useMediaIngestion'
+import type { IngestionTarget } from '../hooks/useMediaIngestion'
+import type { IngestionResponse } from '../lib/api'
+import { TechnicalDetails } from './TechnicalDetails'
+
+export type { IngestionTarget } from '../hooks/useMediaIngestion'
 
 export interface IngestionControlsProps {
   /** Current session ID from useSession */
   sessionId: string | null
   /** Whether a session is active */
   isActive: boolean
-  /** Callback when ingestion starts (to show loading state) */
-  onIngestionStart?: () => void
   /**
-   * Callback when ingestion completes, carrying the full backend result.
+   * Start a session on demand and return its id, or null if one could not be
+   * created.
    *
-   * The whole response is passed rather than just the counts, because the
-   * per-claim evidence and the scorecard are exactly what the caller needs to
-   * render the report. A caller that only wants counts can read them off the
-   * same object.
+   * Only used when there is no active session to ingest into. Ingestion never
+   * runs without a session: either one already exists, or one is created here
+   * first. Omitting it keeps the original behaviour of offering no controls at
+   * all while idle.
    */
+  ensureSession?: () => Promise<string | null>
+  onIngestionStart?: (target?: IngestionTarget) => void
   onIngestionComplete?: (result: IngestionResponse) => void
-  /** Callback for errors */
   onError?: (error: string) => void
-}
-
-type IngestionMode = 'audio' | 'video' | 'url'
-type IngestionStatus = 'idle' | 'uploading' | 'processing' | 'complete' | 'error'
-
-interface IngestionState {
-  mode: IngestionMode | null
-  status: IngestionStatus
-  progress: number
-  message: string
-  fileName?: string
-  error?: string
+  /** Markup decoration only. Defaults to the standalone row. */
+  variant?: 'bar' | 'composer'
+  /** In the composer, promote the URL field to the primary input. */
+  urlPrimary?: boolean
 }
 
 export function IngestionControls({
   sessionId,
   isActive,
+  ensureSession,
   onIngestionStart,
   onIngestionComplete,
   onError,
+  variant = 'bar',
+  urlPrimary = false,
 }: IngestionControlsProps) {
-  const [state, setState] = useState<IngestionState>({
-    mode: null,
-    status: 'idle',
-    progress: 0,
-    message: '',
-  })
   const fileInputRef = useRef<HTMLInputElement>(null)
   const urlInputRef = useRef<HTMLInputElement>(null)
-  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   /** Which button opened the file dialog, read back when a file arrives. */
   const pendingModeRef = useRef<'audio' | 'video'>('audio')
 
-  const resetState = useCallback(() => {
-    setState({
-      mode: null,
-      status: 'idle',
-      progress: 0,
-      message: '',
-    })
-  }, [])
+  const isComposer = variant === 'composer'
 
-  const handleFileSelect = useCallback(
-    async (mode: 'audio' | 'video', file: File) => {
-      if (!sessionId || !isActive) {
-        onError?.('No active session. Start a session first.')
-        return
-      }
-
-      // Validate file type
-      const validAudioTypes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/m4a', 'audio/x-m4a', 'audio/ogg', 'audio/webm', 'audio/flac']
-      const validVideoTypes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm', 'video/x-webm']
-      const validAudioExts = ['.mp3', '.wav', '.m4a', '.ogg', '.webm', '.flac']
-      const validVideoExts = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
-      const ext = '.' + file.name.split('.').pop()?.toLowerCase()
-
-      if (mode === 'audio') {
-        const isValidType = validAudioTypes.includes(file.type) || validAudioExts.includes(ext)
-        if (!isValidType) {
-          onError?.(`Unsupported audio format. Supported: MP3, WAV, M4A, OGG, WebM, FLAC`)
-          return
-        }
-      } else {
-        const isValidType = validVideoTypes.includes(file.type) || validVideoExts.includes(ext)
-        if (!isValidType) {
-          onError?.(`Unsupported video format. Supported: MP4, MOV, AVI, MKV, WebM`)
-          return
-        }
-      }
-
-      // Check file size (100MB for audio, 500MB for video)
-      const maxSize = mode === 'audio' ? 100 * 1024 * 1024 : 500 * 1024 * 1024
-      if (file.size > maxSize) {
-        onError?.(`File too large. Maximum: ${mode === 'audio' ? '100MB' : '500MB'}`)
-        return
-      }
-
-      setState({
-        mode,
-        status: 'uploading',
-        progress: 0,
-        message: `Uploading ${file.name}...`,
-        fileName: file.name,
-      })
-      onIngestionStart?.()
-
-      try {
-        // Simulate upload progress
-        progressIntervalRef.current = setInterval(() => {
-          setState((s) => ({
-            ...s,
-            progress: Math.min(s.progress + 10, 90),
-          }))
-        }, 200)
-
-        let result: IngestionResponse
-        if (mode === 'audio') {
-          result = await ingestAudio(sessionId, file)
-        } else {
-          result = await ingestVideo(sessionId, file)
-        }
-
-        if (progressIntervalRef.current) {
-          clearInterval(progressIntervalRef.current)
-          progressIntervalRef.current = null
-        }
-        setState((s) => ({ ...s, status: 'processing', progress: 95, message: 'Transcribing and fact-checking...' }))
-
-        // Brief delay to show processing
-        await new Promise((r) => setTimeout(r, 500))
-
-        setState((s) => ({
-          ...s,
-          status: 'complete',
-          progress: 100,
-          message: completionMessage(result),
-        }))
-        onIngestionComplete?.(result)
-      } catch (error) {
-        if (progressIntervalRef.current) {
-          clearInterval(progressIntervalRef.current)
-          progressIntervalRef.current = null
-        }
-        const message = error instanceof ApiError ? error.message : 'Ingestion failed'
-        setState((s) => ({
-          ...s,
-          status: 'error',
-          progress: 0,
-          message,
-          error: message,
-        }))
-        onError?.(message)
-      }
+  const hasSession = isActive && sessionId !== null && sessionId !== ''
+  const { state, busy, reset, submitFile, submitUrl } = useMediaIngestion({
+    resolveSession: async () => {
+      if (hasSession) return sessionId
+      if (ensureSession !== undefined) return await ensureSession()
+      return null
     },
-    [sessionId, isActive, onIngestionStart, onIngestionComplete, onError]
-  )
+    onStart: (target) => onIngestionStart?.(target),
+    onComplete: onIngestionComplete,
+    onError,
+  })
 
-  const handleUrlSubmit = useCallback(
-    async (url: string) => {
-      if (!sessionId || !isActive) {
-        onError?.('No active session. Start a session first.')
-        return
-      }
-
-      // Basic URL validation
-      if (!url.trim()) {
-        onError?.('Please enter a URL')
-        return
-      }
-
-      try {
-        new URL(url)
-      } catch {
-        onError?.('Invalid URL format')
-        return
-      }
-
-      // Check if supported URL
-      const isYouTube = /^https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)[\w-]+/.test(url)
-      const isDirectVideo = /\.(mp4|webm|mov|mkv|avi)($|\?)/i.test(url)
-      if (!isYouTube && !isDirectVideo) {
-        onError?.('Unsupported URL. Supported: YouTube videos and direct video links (.mp4, .webm, .mov, .mkv, .avi)')
-        return
-      }
-
-      setState({
-        mode: 'url',
-        status: 'processing',
-        progress: 10,
-        message: 'Downloading and processing video...',
-        fileName: url,
-      })
-      onIngestionStart?.()
-
-      try {
-        progressIntervalRef.current = setInterval(() => {
-          setState((s) => ({
-            ...s,
-            progress: Math.min(s.progress + 5, 90),
-          }))
-        }, 500)
-
-        const result = await ingestVideoUrl(sessionId, url.trim())
-
-        if (progressIntervalRef.current) {
-          clearInterval(progressIntervalRef.current)
-          progressIntervalRef.current = null
-        }
-        setState((s) => ({ ...s, progress: 95, message: 'Fact-checking complete...' }))
-
-        await new Promise((r) => setTimeout(r, 500))
-
-        setState((s) => ({
-          ...s,
-          status: 'complete',
-          progress: 100,
-          message: completionMessage(result),
-        }))
-        onIngestionComplete?.(result)
-      } catch (error) {
-        if (progressIntervalRef.current) {
-          clearInterval(progressIntervalRef.current)
-          progressIntervalRef.current = null
-        }
-        const message = error instanceof ApiError ? error.message : 'URL ingestion failed'
-        setState((s) => ({
-          ...s,
-          status: 'error',
-          progress: 0,
-          message,
-          error: message,
-        }))
-        onError?.(message)
-      }
-    },
-    [sessionId, isActive, onIngestionStart, onIngestionComplete, onError]
-  )
-
-  const handleAudioClick = useCallback(() => {
-    // Recorded before the dialog opens. `state.mode` cannot do this job: it is
-    // only set once a file has been chosen, so the change handler used to read
-    // `null` and treat every selection -- including an .mp3 -- as a video,
-    // rejecting it as an unsupported video format.
-    pendingModeRef.current = 'audio'
-    fileInputRef.current?.click()
-  }, [])
-
-  const handleVideoClick = useCallback(() => {
-    pendingModeRef.current = 'video'
-    fileInputRef.current?.click()
-  }, [])
-
-  const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0]
-      if (file) {
-        handleFileSelect(pendingModeRef.current, file)
-        // Reset input so same file can be selected again
-        e.target.value = ''
-      }
-    },
-    [handleFileSelect]
-  )
-
-  const handleUrlKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        handleUrlSubmit(e.currentTarget.value)
-        e.currentTarget.value = ''
-      }
-    },
-    [handleUrlSubmit]
-  )
-
-  if (!isActive || !sessionId) {
+  // A session to ingest into, or a way to obtain one. With neither, there is
+  // nothing these controls could do, so they are not offered at all.
+  if (!hasSession && ensureSession === undefined) {
     return null
   }
 
+  const handlePick = (kind: 'audio' | 'video') => {
+    // Recorded before the dialog opens. The run state cannot do this job: it is
+    // only set once a file has been chosen, so reading it would treat every
+    // selection -- including an .mp3 -- as a video.
+    pendingModeRef.current = kind
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file !== undefined) {
+      const preview = createPreviewUrl(file)
+      void submitFile(pendingModeRef.current, file, preview)
+      // Reset input so the same file can be chosen again.
+      event.target.value = ''
+    }
+  }
+
+  const handleUrlKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      void submitUrl(event.currentTarget.value)
+      event.currentTarget.value = ''
+    }
+  }
+
+  const classes = [
+    'ingestion-controls',
+    isComposer ? 'ingestion-controls--composer' : '',
+    urlPrimary ? 'ingestion-controls--url' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
   return (
-    <section className="ingestion-controls" aria-label="Recorded media ingestion">
-      <div className="controls__group">
+    <section className={classes} aria-label="Recorded media ingestion">
+      <div className="controls__group ingestion-row">
         <button
           type="button"
-          className="button"
-          onClick={handleAudioClick}
-          disabled={state.status === 'uploading' || state.status === 'processing'}
-          title="Upload an audio file (MP3, WAV, M4A, OGG, WebM, FLAC)"
-        >
-          Upload Audio
-        </button>
-        <button
-          type="button"
-          className="button"
-          onClick={handleVideoClick}
-          disabled={state.status === 'uploading' || state.status === 'processing'}
+          className="button ingestion-upload ingestion-upload--video"
+          onClick={() => handlePick('video')}
+          disabled={busy}
+          aria-label="Upload Video"
           title="Upload a video file (MP4, MOV, WebM, AVI, MKV)"
         >
-          Upload Video
+          {isComposer ? '+ Add video' : 'Upload Video'}
         </button>
-        <input
-          ref={urlInputRef}
-          type="url"
-          placeholder="Paste YouTube or video URL..."
-          className="ingestion-url-input"
-          onKeyDown={handleUrlKeyDown}
-          disabled={state.status === 'uploading' || state.status === 'processing'}
-          title="Paste a YouTube URL or direct video link"
-        />
         <button
           type="button"
-          className="button"
-          onClick={() => handleUrlSubmit(urlInputRef.current?.value || '')}
-          disabled={state.status === 'uploading' || state.status === 'processing'}
-          title="Analyze video URL"
+          className="button ingestion-upload ingestion-upload--audio"
+          onClick={() => handlePick('audio')}
+          disabled={busy}
+          aria-label="Upload Audio"
+          title="Upload an audio file (MP3, WAV, M4A, OGG, WebM, FLAC)"
         >
-          Analyze URL
+          {isComposer ? '+ Add audio' : 'Upload Audio'}
         </button>
+        <span className="ingestion-url">
+          <input
+            ref={urlInputRef}
+            type="url"
+            placeholder="Paste YouTube or video URL..."
+            className="ingestion-url-input"
+            onKeyDown={handleUrlKeyDown}
+            disabled={busy}
+            title="Paste a YouTube URL or direct video link"
+          />
+          <button
+            type="button"
+            className="button ingestion-url-go"
+            onClick={() => void submitUrl(urlInputRef.current?.value ?? '')}
+            disabled={busy}
+            aria-label="Analyze URL"
+            title="Analyze video URL"
+          >
+            {isComposer ? 'Analyze ➤' : 'Analyze URL'}
+          </button>
+        </span>
       </div>
 
       <input
@@ -348,23 +173,16 @@ export function IngestionControls({
       {state.status !== 'idle' && (
         <div className="ingestion-progress" role="status" aria-live="polite">
           <div className="ingestion-progress__header">
-            <span className="ingestion-progress__file">{state.fileName || 'Processing...'}</span>
+            <span className="ingestion-progress__file">{state.label || 'Processing…'}</span>
             <span className="ingestion-progress__status">{state.message}</span>
-          </div>
-          <div className="ingestion-progress__bar">
-            <div
-              className="ingestion-progress__fill"
-              style={{ width: `${state.progress}%` }}
-            />
           </div>
           {state.status === 'error' && (
             <div className="ingestion-progress__error">
-              Error: {state.error}
-              <button
-                type="button"
-                className="button button--small"
-                onClick={resetState}
-              >
+              <span className="ingestion-progress__errorText">{state.message}</span>
+              {state.error !== null && state.error.length > 140 && (
+                <TechnicalDetails summary="Technical details">{state.error}</TechnicalDetails>
+              )}
+              <button type="button" className="button button--small" onClick={reset}>
                 Dismiss
               </button>
             </div>
@@ -372,11 +190,7 @@ export function IngestionControls({
           {state.status === 'complete' && (
             <div className="ingestion-progress__success">
               {state.message}
-              <button
-                type="button"
-                className="button button--small"
-                onClick={resetState}
-              >
+              <button type="button" className="button button--small" onClick={reset}>
                 Done
               </button>
             </div>

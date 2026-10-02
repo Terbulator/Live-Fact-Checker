@@ -1,5 +1,17 @@
 import '@testing-library/jest-dom';
+import { configure } from '@testing-library/react';
 import { vi } from 'vitest';
+
+/**
+ * How long a `findBy*` waits before giving up.
+ *
+ * The default is one second, which is fine on a quiet machine and is a coin flip
+ * on a busy one: a single slow test-file transform can push a render past a
+ * second and turn a passing assertion into a timeout. Five seconds keeps these
+ * tests about the code rather than about how busy the machine is, and it cannot
+ * hide a real failure — a broken assertion still never arrives.
+ */
+configure({ asyncUtilTimeout: 5000 });
 
 // Mock matchMedia
 Object.defineProperty(window, 'matchMedia', {
@@ -56,3 +68,10 @@ class MockIntersectionObserver implements IntersectionObserver {
 }
 
 global.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver
+
+// jsdom implements no layout, so scrolling an element into view is not a thing
+// it can do. Components that keep the newest line or message in view call it on
+// mount; without a stub those components cannot be rendered in a test at all.
+if (typeof Element.prototype.scrollIntoView !== 'function') {
+  Element.prototype.scrollIntoView = function scrollIntoView() {}
+}

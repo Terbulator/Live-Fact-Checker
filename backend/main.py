@@ -9,8 +9,9 @@ Run locally::
     uvicorn backend.main:app --reload
 """
 
+import asyncio
 import json
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any, Optional
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -163,6 +164,33 @@ def _is_strict_claim_engine(claim_engine: ClaimEngine) -> bool:
     )
 
 
+async def _warm_ytdlp_runtime() -> None:
+    """Fetch the Deno runtime yt-dlp needs for YouTube, off the request path.
+
+    Downloading it on the first YouTube request would put a ~40MB transfer in
+    front of a user. Warming it at startup means the first real ingest only
+    pays a local disk read. Any failure is logged and ignored: YouTube is an
+    optional input, so a missing runtime must not stop the backend booting.
+    """
+    from backend.ingestion.deno_runtime import DenoRuntimeUnavailable, ensure_deno_runtime
+
+    try:
+        path = await ensure_deno_runtime()
+        logger.info("yt-dlp JS runtime ready at %s", path, extra={"trace": "DENO_READY"})
+    except DenoRuntimeUnavailable as exc:
+        logger.warning(
+            "yt-dlp JS runtime unavailable, YouTube ingestion will fail: %s",
+            exc,
+            extra={"trace": "DENO_UNAVAILABLE"},
+        )
+    except Exception as exc:  # noqa: BLE001 - warm-up must never break startup
+        logger.warning(
+            "yt-dlp JS runtime warm-up failed: %s",
+            type(exc).__name__,
+            extra={"trace": "DENO_WARMUP_FAILED"},
+        )
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Configure logging on startup and tear down state on shutdown."""
@@ -189,12 +217,17 @@ async def _lifespan(app: FastAPI):
         settings.use_mock_engines,
         extra={"trace": "BACKEND_STARTING", "mockEngines": settings.use_mock_engines},
     )
+    deno_task = asyncio.create_task(_warm_ytdlp_runtime())
     try:
         store = getattr(app.state, "store", None)
         if store is not None:
             await store.connect()
         yield
     finally:
+        # Cancel the warm-up before anything else so it cannot outlive shutdown.
+        deno_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await deno_task
         # Settle the mock pipelines first so no task is left pending.
         await app.state.session_manager.cancel_all_background_tasks()
         await app.state.websocket_manager.clear()

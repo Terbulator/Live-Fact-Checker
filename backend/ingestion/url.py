@@ -9,10 +9,12 @@ paywalls, or platform protections.
 """
 
 import os
+import sys
 import tempfile
 import asyncio
 import subprocess
 import re
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 from urllib.parse import urlparse
 
@@ -21,6 +23,7 @@ import httpx
 from backend.ingestion.models import InputSource, InputType, ProcessingStatus, IngestionError
 from backend.ingestion.audio import transcribe_audio_file
 from backend.ingestion.video import extract_audio_from_video, get_media_duration
+from backend.ingestion.deno_runtime import DenoRuntimeUnavailable, ensure_deno_runtime
 from backend.config import get_settings
 
 
@@ -134,8 +137,24 @@ async def download_video_url(url: str, output_path: str) -> int:
     return total
 
 
+def _ytdlp_cmd() -> List[str]:
+    """Invoke yt-dlp through this interpreter.
+
+    The bare ``yt-dlp`` console script only resolves if its install directory is
+    on PATH, which is true for a shell-activated venv but not guaranteed for a
+    service manager. ``python -m yt_dlp`` always uses the yt-dlp that was
+    installed alongside the running interpreter.
+    """
+    return [sys.executable, "-m", "yt_dlp"]
+
+
 async def download_youtube_video(url: str, output_path: str) -> int:
-    """Download YouTube video using yt-dlp.
+    """Download YouTube audio using yt-dlp.
+
+    yt-dlp needs a JavaScript runtime to solve YouTube's challenge scripts, and
+    EJS components are disallowed by default, so both are enabled explicitly.
+    The runtime path is resolved by ``ensure_deno_runtime`` (preinstalled binary
+    if the image provides one, otherwise the pinned official release).
 
     Args:
         url: YouTube URL
@@ -143,19 +162,36 @@ async def download_youtube_video(url: str, output_path: str) -> int:
 
     Returns:
         File size in bytes
+
+    Raises:
+        URLError: if yt-dlp is missing, the runtime is unavailable, or YouTube
+            refuses to serve the video.
     """
-    # Check if yt-dlp is available
     try:
-        subprocess.run(["yt-dlp", "--version"], capture_output=True, check=True)
+        deno_path = await ensure_deno_runtime()
+    except DenoRuntimeUnavailable as exc:
+        raise URLError(str(exc), "YT_DLP_RUNTIME_UNAVAILABLE")
+
+    ytdlp = _ytdlp_cmd()
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ytdlp + ["--version"], capture_output=True, check=True, text=True
+            ),
+        )
     except (subprocess.CalledProcessError, FileNotFoundError):
         raise URLError(
             "yt-dlp not installed. Install with: pip install yt-dlp",
             "YT_DLP_NOT_FOUND",
         )
 
-    # Use yt-dlp to download best audio/video
-    cmd = [
-        "yt-dlp",
+    cmd = ytdlp + [
+        # yt-dlp 2026.08.x: Deno is the highest-priority runtime, and remote
+        # components are disallowed unless named, so EJS solving is opt-in.
+        "--js-runtimes", f"deno:{deno_path}",
+        "--remote-components", "ejs:github",
         "-f", "bestaudio[ext=m4a]/bestaudio/best",  # Prefer audio-only for transcription
         "-o", output_path + ".%(ext)s",
         "--no-playlist",
@@ -173,18 +209,120 @@ async def download_youtube_video(url: str, output_path: str) -> int:
         raise URLError("YouTube download timed out", "DOWNLOAD_TIMEOUT")
 
     if proc.returncode != 0:
-        raise URLError(
-            f"yt-dlp failed: {proc.stderr}",
-            "DOWNLOAD_FAILED",
-        )
+        raise _ytdlp_failure(proc.stderr)
 
-    # Find the downloaded file
-    for ext in [".m4a", ".webm", ".mp4", ".opus"]:
-        test_path = output_path + ext
-        if os.path.exists(test_path):
-            return os.path.getsize(test_path)
+    downloaded = _find_downloaded_file(output_path)
+    if downloaded is None:
+        raise URLError("Downloaded file not found", "DOWNLOAD_FAILED")
+    return os.path.getsize(downloaded)
 
-    raise URLError("Downloaded file not found", "DOWNLOAD_FAILED")
+
+def _find_downloaded_file(output_path: str) -> Optional[str]:
+    """Locate the file yt-dlp wrote for ``output_path``.
+
+    Prefers the audio formats we can hand straight to AssemblyAI, then falls
+    back to whatever single file yt-dlp left in the directory, so a format
+    change upstream cannot turn a successful download into a 400.
+    """
+    for ext in (".m4a", ".webm", ".mp4", ".opus"):
+        candidate = output_path + ext
+        if os.path.exists(candidate):
+            return candidate
+
+    parent = os.path.dirname(output_path) or "."
+    try:
+        leftovers = [p for p in Path(parent).iterdir() if p.is_file()]
+    except OSError:
+        return None
+    return str(leftovers[0]) if len(leftovers) == 1 else None
+
+
+# Each entry is (substring, code, user message).
+#
+# Order matters. "Sign in to confirm your age" and "Join this channel to get
+# access" are more specific than the bot check, and the age message literally
+# contains "sign in to confirm", so the generic entry has to come last.
+_YTDLP_FAILURES = (
+    (
+        "confirm your age",
+        "YOUTUBE_AGE_RESTRICTED",
+        "This YouTube video is age-restricted and cannot be fetched without "
+        "signing in, which we do not do. Try a different video.",
+    ),
+    (
+        "members-only",
+        "YOUTUBE_MEMBERS_ONLY",
+        "This YouTube video is members-only, so it cannot be fetched. Try a "
+        "different video.",
+    ),
+    (
+        "join this channel",
+        "YOUTUBE_MEMBERS_ONLY",
+        "This YouTube video is members-only, so it cannot be fetched. Try a "
+        "different video.",
+    ),
+    (
+        "private video",
+        "YOUTUBE_PRIVATE",
+        "This YouTube video is private, so it cannot be fetched. Ask the "
+        "uploader to make it public.",
+    ),
+    (
+        "video unavailable",
+        "YOUTUBE_UNAVAILABLE",
+        "This YouTube video is unavailable. It may have been removed or is "
+        "blocked in this region.",
+    ),
+    (
+        "is not a valid url",
+        "YOUTUBE_BAD_URL",
+        "That does not look like a valid YouTube URL.",
+    ),
+    (
+        "sign in to confirm",
+        "YOUTUBE_BOT_CHECK",
+        "YouTube would not serve this video to our server because it wants to "
+        "verify we are not a bot. This is a YouTube access restriction, not a "
+        "problem with the video, and we cannot sign in or bypass it. Try a "
+        "different video, or upload the audio/video file directly.",
+    ),
+    (
+        "confirm you are not a bot",
+        "YOUTUBE_BOT_CHECK",
+        "YouTube would not serve this video because it wants to verify we are "
+        "not a bot. We cannot sign in or bypass that check. Try a different "
+        "video, or upload the audio/video file directly.",
+    ),
+)
+
+
+def _ytdlp_failure(stderr: Optional[str]) -> URLError:
+    """Turn yt-dlp's raw stderr into a short, user-facing ingestion error.
+
+    yt-dlp's stderr carries multi-line banners (deprecation warnings, JS runtime
+    notices) that mean nothing to a user, so only the trailing ``ERROR:`` line
+    is surfaced.
+    """
+    text = (stderr or "").strip()
+    lowered = text.lower()
+
+    for marker, code, message in _YTDLP_FAILURES:
+        if marker in lowered:
+            return URLError(message, code)
+
+    detail = ""
+    for line in reversed(text.splitlines()):
+        if line.strip().lower().startswith("error"):
+            detail = line.strip()
+            break
+    if not detail:
+        detail = text.splitlines()[-1].strip() if text else "no output"
+
+    return URLError(
+        f"YouTube download failed: {detail[:300]}",
+        "YOUTUBE_DOWNLOAD_FAILED",
+    )
+
 
 
 async def process_video_url(
@@ -229,28 +367,17 @@ async def process_video_url(
             audio_path = os.path.join(tmpdir, "audio")
             file_size = await download_youtube_video(url, audio_path)
 
-            # Find the actual downloaded file
-            downloaded_file = None
-            for ext in [".m4a", ".webm", ".mp4", ".opus"]:
-                test_path = audio_path + ext
-                if os.path.exists(test_path):
-                    downloaded_file = test_path
-                    break
-
+            # download_youtube_video already resolved the file, but locate it
+            # again for the transcode step.
+            downloaded_file = _find_downloaded_file(audio_path)
             if not downloaded_file:
                 raise URLError("YouTube download produced no file", "DOWNLOAD_FAILED")
 
-            # If it's already audio, transcribe directly; else extract audio
-            if downloaded_file.endswith((".m4a", ".opus")):
-                # Convert to WAV for AssemblyAI
-                wav_path = os.path.join(tmpdir, "audio.wav")
-                await extract_audio_from_video(downloaded_file, wav_path)
-                audio_to_transcribe = wav_path
-            else:
-                # Video file - extract audio
-                wav_path = os.path.join(tmpdir, "audio.wav")
-                await extract_audio_from_video(downloaded_file, wav_path)
-                audio_to_transcribe = wav_path
+            # Convert to WAV for AssemblyAI, whether the download arrived as
+            # audio or as a video container.
+            wav_path = os.path.join(tmpdir, "audio.wav")
+            await extract_audio_from_video(downloaded_file, wav_path)
+            audio_to_transcribe = wav_path
 
         else:
             # Direct video URL

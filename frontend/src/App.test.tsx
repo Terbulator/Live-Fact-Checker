@@ -2,9 +2,13 @@
  * Route smoke tests.
  *
  * These assert the things that are easy to break while refactoring and
- * expensive to notice: that each route mounts, and that the auth pages say
- * plainly that no authentication exists. They do not assert on marketing copy,
- * which is expected to change.
+ * expensive to notice: that each route mounts, and that neither auth page claims
+ * something untrue about itself. They do not assert on marketing copy, which is
+ * expected to change.
+ *
+ * The auth pages run against the real `AuthProvider` with no Supabase project
+ * configured, which is itself a case worth covering: every route must still
+ * mount and stay honest.
  *
  * `App` owns a BrowserRouter, so the path is set through the history API rather
  * than a MemoryRouter wrapper.
@@ -49,16 +53,18 @@ describe('App routes', () => {
     ).toBeInTheDocument();
   });
 
-  it('does not claim authentication works', () => {
+  it('mounts the login form and does not claim accounts are unavailable', () => {
     renderAt('/login');
-    expect(screen.getByText(/accounts are not implemented/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^sign in$/i })).toBeDisabled();
+    expect(screen.getByRole('heading', { name: /welcome back/i })).toBeInTheDocument();
+    // The old page carried this notice. Nothing may reintroduce it.
+    expect(screen.queryByText(/accounts are not implemented/i)).not.toBeInTheDocument();
   });
 
-  it('does not claim signup works either', () => {
+  it('mounts the signup form and does not claim accounts are unavailable', () => {
     renderAt('/signup');
-    expect(screen.getByText(/accounts are not implemented/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^(create|sign up)/i })).toBeDisabled();
+    expect(screen.getByRole('heading', { name: /create your account/i })).toBeInTheDocument();
+    expect(screen.queryByText(/accounts are not implemented/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/not available yet/i)).not.toBeInTheDocument();
   });
 
   it('falls back to the landing page for an unknown path', () => {
@@ -66,8 +72,10 @@ describe('App routes', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/fact-check anything/i);
   });
 
-  it('marks session history as coming soon rather than built', () => {
+  it('marks the guest account as a guest rather than as coming soon', () => {
     renderAt('/dashboard');
-    expect(screen.getAllByText('COMING SOON').length).toBeGreaterThan(0);
+    // Accounts are real now, so the badge says who you are, not that the
+    // feature is missing.
+    expect(screen.getAllByText('GUEST').length).toBeGreaterThan(0);
   });
 });

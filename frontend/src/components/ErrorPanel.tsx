@@ -6,8 +6,15 @@
  *
  * - a **fault** is this client failing to reach or stay on the backend
  * - an **error event** is the backend reporting a recoverable pipeline problem
+ *
+ * Both state the consequence in the user's own words -- what is broken and what
+ * still works -- and keep the machine-readable code, the raw transport message
+ * and any provider detail inside a "Technical details" disclosure. A stack-shaped
+ * string is not something a reader can act on, and showing it by default trains
+ * people to ignore the panel that matters.
  */
 
+import { TechnicalDetails } from './TechnicalDetails'
 import type { ErrorEvent } from '../types/events'
 
 export interface ErrorPanelProps {
@@ -31,9 +38,13 @@ export function ErrorPanel({
 
       {fault !== null && (
         <div className="alert alert--fault">
-          <div>
+          <div className="alert__body">
             <strong className="alert__code">Connection</strong>
-            <p className="alert__message">{fault}</p>
+            <p className="alert__message">
+              Lost contact with the backend, so results are not arriving. Checks
+              resume on their own once the connection is back.
+            </p>
+            <TechnicalDetails>{fault}</TechnicalDetails>
           </div>
           <button
             type="button"
@@ -53,12 +64,21 @@ export function ErrorPanel({
                 className={`alert${error.recoverable ? '' : ' alert--fatal'}`}
                 key={`${error.code}-${error.claimId ?? 'none'}-${index}`}
               >
-                <div>
+                <div className="alert__body">
                   <strong className="alert__code">{error.code}</strong>
-                  <p className="alert__message">{error.message}</p>
-                  {error.detail !== null && error.detail !== undefined && (
-                    <p className="alert__detail">{error.detail}</p>
-                  )}
+                  <p className="alert__message">
+                    {error.recoverable
+                      ? 'The check for one claim did not complete. The rest of the session is unaffected.'
+                      : 'The session stopped because of this error. Start a new check to continue.'}
+                  </p>
+                  <TechnicalDetails>
+                    {[
+                      error.message,
+                      error.detail ?? null,
+                    ]
+                      .filter((part): part is string => part !== null && part !== '')
+                      .join('\n')}
+                  </TechnicalDetails>
                 </div>
               </li>
             ))}

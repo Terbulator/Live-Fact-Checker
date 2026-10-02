@@ -115,19 +115,29 @@ export function collectSourceRows(
   sources: EvidenceSource[] | undefined,
 ): DisplaySource[] {
   const rows: DisplaySource[] = []
-  const seen = new Set<string>()
 
   const push = (url: unknown, title: unknown, snippet: unknown, primary: boolean) => {
     if (typeof url !== 'string') return
     const trimmed = url.trim()
-    if (trimmed === '' || seen.has(trimmed)) return
-    seen.add(trimmed)
-    rows.push({
-      url: trimmed,
-      title: typeof title === 'string' && title.trim() !== '' ? title.trim() : null,
-      snippet: typeof snippet === 'string' && snippet.trim() !== '' ? snippet.trim() : null,
-      primary,
-    })
+    if (trimmed === '') return
+
+    // The same page is often both the primary citation and one of the evidence
+    // rows, and only the evidence row carries its title and snippet. A plain
+    // skip would throw that evidence away, so a repeat merges into the row
+    // already there rather than replacing or duplicating it.
+    const existing = rows.find((row) => row.url === trimmed)
+    const cleanTitle =
+      typeof title === 'string' && title.trim() !== '' ? title.trim() : null
+    const cleanSnippet =
+      typeof snippet === 'string' && snippet.trim() !== '' ? snippet.trim() : null
+
+    if (existing !== undefined) {
+      existing.title = existing.title ?? cleanTitle
+      existing.snippet = existing.snippet ?? cleanSnippet
+      return
+    }
+
+    rows.push({ url: trimmed, title: cleanTitle, snippet: cleanSnippet, primary })
   }
 
   push(source, null, null, true)
