@@ -46,7 +46,7 @@ export function Hero() {
             Turn live speech, audio, video and online content into evidence-backed facts.
           </p>
           <div className="lfp-hero__actions">
-            <Link to="/dashboard" className="lfp-btn lfp-btn--primary lfp-btn--lg">
+            <Link to="/dashboard" className="lfp-btn lfp-btn--primary lfp-btn--invert lfp-btn--lg">
               Start for Free
               <ArrowRight size={17} aria-hidden="true" />
             </Link>

@@ -344,9 +344,37 @@
 .lfp-btn:active { transform: translateY(0); }
 .lfp-btn:focus-visible { outline: 2px solid var(--lfp-lime); outline-offset: 3px; }
 
-/* Primary follows the band. Never a field of neon green. */
+/* Primary follows the band. `lfp-btn--invert`, below, is the one exception. */
 .lfp-btn--primary { background: var(--lfp-cta-bg); color: var(--lfp-cta-ink); }
 .lfp-btn--primary:hover { background: var(--lfp-lime); color: #14260a; }
+
+/*
+ * The hero and navbar CTAs reverse the band's primary: a field of lime with ink
+ * text, then back to ink with lime text under the pointer. Same two tokens,
+ * swapped, so it needs no colour of its own.
+ *
+ * Written with both `lfp-btn` classes so it outranks `lfp-btn--primary` on
+ * specificity rather than on source order. The closing CTA shares
+ * `lfp-btn--primary` and deliberately keeps following the band.
+ */
+.lfp-btn.lfp-btn--invert { background: var(--lfp-lime); color: var(--lfp-ink); }
+.lfp-btn.lfp-btn--invert:hover { background: var(--lfp-ink); color: var(--lfp-lime); }
+
+/*
+ * The shared focus ring is lime, which is now this button's own background and
+ * so would be invisible against it. The ring tracks the opposite of whichever
+ * background is showing: ink on the resting lime button, lime once it has
+ * inverted. No glow — just a ring that can actually be seen.
+ */
+.lfp-btn.lfp-btn--invert:focus-visible { outline-color: var(--lfp-ink); }
+.lfp-btn.lfp-btn--invert:hover:focus-visible { outline-color: var(--lfp-lime); }
+
+/*
+ * The bar's CTA is the same action as the hero's, so it inverts identically.
+ * Only the timing differs: `.lfp-btn` transitions at 180ms, and the navbar copy
+ * wants a slightly softer 220ms. Scoped to `.lfp-nav` so the hero keeps its own.
+ */
+.lfp-nav .lfp-btn--invert { transition-duration: 220ms; }
 
 .lfp-btn--ghost {
   background: transparent;

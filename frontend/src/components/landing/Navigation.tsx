@@ -94,7 +94,7 @@ export function Navigation() {
           <Link to="/login" className="lfp-btn lfp-btn--ghost lfp-btn--sm">
             Log in
           </Link>
-          <Link to="/dashboard" className="lfp-btn lfp-btn--primary lfp-btn--sm">
+          <Link to="/dashboard" className="lfp-btn lfp-btn--primary lfp-btn--invert lfp-btn--sm">
             Start for Free
           </Link>
         </div>
@@ -132,7 +132,7 @@ export function Navigation() {
           </Link>
           <Link
             to="/dashboard"
-            className="lfp-btn lfp-btn--primary"
+            className="lfp-btn lfp-btn--primary lfp-btn--invert"
             onClick={() => setOpen(false)}
           >
             Start for Free
